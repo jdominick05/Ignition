@@ -54,8 +54,14 @@ class Model:
         else:
             raise TypeError(f"Invalid backend type: {type(backend)}")
 
+        self.backend_name = backend.lower() if isinstance(backend, str) else getattr(backend, "name", "xdna1")
+
         # 2. Load model into backend
         self.backend.load(model_path, **kwargs)
+
+    def _is_yolo_model(self) -> bool:
+        """Determines if the loaded model is a YOLO architecture."""
+        return "yolo" in str(self.model_path).lower()
 
     def predict(
         self,
@@ -63,14 +69,8 @@ class Model:
         input_size: Optional[Tuple[int, int]] = None
     ) -> np.ndarray:
         """
-        Executes inference, handling image loading, resizing, and type marshaling transparently.
-
-        Args:
-            input_data: File path, PIL Image, or NumPy array.
-            input_size: Optional (height, width) tuple for image resizing.
-
-        Returns:
-            np.ndarray: Model predictions (unswizzled standard array).
+        Executes forward inference on input data.
+        Automatically handles preprocessing and device execution.
         """
         # 1. Preprocess input
         tensor = self._preprocess(input_data, input_size=input_size)
@@ -81,14 +81,33 @@ class Model:
     def stream(
         self,
         frame_iterator: Any,
-        input_size: Optional[Tuple[int, int]] = None,
+        conf_thres: Optional[float] = None,
+        iou_thres: Optional[float] = None,
+        annotate: bool = False,
+        **kwargs
     ):
         """
         Pipelined streaming inference over an input frame iterator.
-        Yields predictions in real time as each frame completes.
+        Yields predictions or YOLOResult in real time as each frame completes.
         """
+        if self._is_yolo_model():
+            from .pipelines.streaming import AsyncYOLOPipeline
+            async_pipe = AsyncYOLOPipeline(
+                model_path=self.model_path,
+                backend=self.backend_name,
+                conf_thres=conf_thres or 0.25,
+                iou_thres=iou_thres or 0.45,
+            )
+            try:
+                yield from async_pipe.stream(
+                    frame_iterator, conf_thres=conf_thres, iou_thres=iou_thres, annotate=annotate
+                )
+            finally:
+                async_pipe.close()
+            return
+
         for item in frame_iterator:
-            yield self.predict(item, input_size=input_size)
+            yield self.predict(item, **kwargs)
 
     def benchmark(
         self,
