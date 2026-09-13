@@ -29,6 +29,7 @@ dependencies = [
     "numpy>=1.24.0",
     "onnxruntime>=1.15.0",
     "pillow>=9.0.0",
+    "opencv-python>=4.7.0",
     "click>=8.0.0",
     "ignite-xdna>=0.2.0",
 ]
@@ -45,3 +46,7 @@ ignition = "ignition.cli.main:cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"ignition.assets" = ["*.xclbin", "*.bin"]
+

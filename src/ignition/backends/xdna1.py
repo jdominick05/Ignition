@@ -34,11 +34,22 @@ class XDNA1Backend(BaseBackend):
         Supports ONNX model files, ONNX ModelProtos, and PartitionedGraph instances.
         """
         from ignite_xdna.runtime.session import InferenceSession
+        from ignition.assets import get_default_xclbin_path
+
+        xclbin_path = kwargs.get("xclbin_path")
+        if xclbin_path is None:
+            try:
+                cand = get_default_xclbin_path()
+                if cand.exists():
+                    xclbin_path = str(cand)
+            except Exception:
+                pass
 
         # Pass model directly to InferenceSession which automatically invokes
         # GraphPartitioner and MemTileMultiPassScheduler for multi-layer subgraphs
         self.session = InferenceSession(
             model_path_or_bundle=model_path,
+            xclbin_path=xclbin_path,
             device_index=self.device_id,
             num_cores=self.num_cores,
             enable_fusion=kwargs.get("enable_fusion", True),
