@@ -103,5 +103,44 @@ def benchmark_model(model_path, backend, iterations, warmup, compare_cpu):
         click.echo("================================================================================")
 
 
+@cli.command("detect")
+@click.argument("model_path", type=click.Path(exists=True))
+@click.option("--input", "-i", "input_path", type=click.Path(exists=True), required=True, help="Path to input image file.")
+@click.option("--output", "-o", "output_path", default="yolo_output.jpg", type=str, help="Path to save annotated visual detection image.")
+@click.option("--backend", "-b", default="xdna1", type=click.Choice(["xdna1", "cpu"]), help="Execution target backend.")
+@click.option("--conf", "-c", default=0.25, type=float, help="Confidence score threshold (default: 0.25).")
+@click.option("--iou", default=0.45, type=float, help="NMS IoU threshold (default: 0.45).")
+def detect_objects(model_path, input_path, output_path, backend, conf, iou):
+    """Execute end-to-end YOLOv8 object detection on AMD Phoenix AIE2 silicon or CPU."""
+    click.echo(f"[*] Compiling YOLOv8 detection pipeline on target '{backend.upper()}'...")
+    try:
+        pipeline = ignition.compile(
+            model_path,
+            backend=backend,
+            pipeline="yolo",
+            conf_thres=conf,
+            iou_thres=iou,
+        )
+    except Exception as e:
+        click.secho(f"[-] Pipeline compilation error: {e}", fg="red")
+        sys.exit(1)
+
+    try:
+        click.echo(f"[*] Executing detection on '{Path(input_path).name}'...")
+        result = pipeline.predict(input_path, conf_thres=conf, iou_thres=iou)
+
+        # Save output image
+        out_p = Path(output_path).resolve()
+        result.save(out_p)
+
+        click.echo()
+        click.echo(result.summary())
+        click.echo()
+        click.secho(f"[+] Detection visual output saved: {out_p}", fg="green", bold=True)
+    finally:
+        pipeline.close()
+
+
 if __name__ == "__main__":
     cli()
+

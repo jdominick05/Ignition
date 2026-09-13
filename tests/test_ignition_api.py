@@ -169,3 +169,36 @@ def test_cli_commands(synthetic_models):
     res_bench = runner.invoke(cli, ["benchmark", str(m_path), "--backend", "xdna1", "--iterations", "20", "--warmup", "5"])
     assert res_bench.exit_code == 0
     assert "Benchmark Report (xdna1)" in res_bench.output
+
+
+def test_yolo_pipeline():
+    """Verifies end-to-end YOLOv8 object detection pipeline on physical Phoenix AIE2 silicon."""
+    yolo_model = Path(r"C:\Users\Ignis\PycharmProjects\ignite-xdna\models\yolov8n_cut_xint8.onnx")
+    bus_img = Path(__file__).parent.parent / "examples" / "assets" / "bus.jpg"
+    if not yolo_model.exists() or not bus_img.exists():
+        pytest.skip("YOLOv8 cut model or test image not present.")
+
+    pipeline = ignition.compile(yolo_model, backend="xdna1", pipeline="yolo")
+    res = pipeline.predict(bus_img)
+    assert res is not None
+    assert len(res.detections) >= 4
+    class_names = [d.class_name for d in res.detections]
+    assert "person" in class_names
+    assert "bus" in class_names
+    pipeline.close()
+
+
+def test_cli_detect():
+    """Verifies ignition detect CLI command on physical silicon."""
+    yolo_model = Path(r"C:\Users\Ignis\PycharmProjects\ignite-xdna\models\yolov8n_cut_xint8.onnx")
+    bus_img = Path(__file__).parent.parent / "examples" / "assets" / "bus.jpg"
+    if not yolo_model.exists() or not bus_img.exists():
+        pytest.skip("YOLOv8 cut model or test image not present.")
+
+    runner = CliRunner()
+    res = runner.invoke(cli, ["detect", str(yolo_model), "--input", str(bus_img), "--backend", "xdna1"])
+    assert res.exit_code == 0
+    assert "=== YOLOv8 Detection Result ===" in res.output
+    assert "person" in res.output
+    assert "bus" in res.output
+
