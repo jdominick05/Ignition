@@ -1,5 +1,5 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 examples/yolo_vision_demo.py
 Standalone visual object detection demo using the Ignition high-performance engine
