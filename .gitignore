@@ -33,15 +33,17 @@ ENV/
 *.swp
 *.swo
 
-# Testing
+# Development tools, benchmarks, and internal scripts
+scripts/
+benchmarks/
+results/
 tests/
+tools/
 .pytest_cache/
 .coverage
 htmlcov/
 
 # Logs and test outputs
 *.log
-!results/**/*.log
-!results/*.log
 yolo_output.jpg
 examples/assets/*_output.jpg
