@@ -1,5 +1,5 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 src/ignition/pipelines/streaming.py
 High-performance 3-stage asynchronous pipelined execution runner for Ignition on AMD Phoenix silicon.
@@ -130,7 +130,7 @@ class AsyncYOLOPipeline:
             ort.set_default_logger_severity(3)
         sess_options = ort.SessionOptions()
         sess_options.log_severity_level = 3
-        sess_options.intra_op_num_threads = min(os.cpu_count() or 10, 10)
+        sess_options.intra_op_num_threads = min(os.cpu_count() or 12, 12)
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
         self.ort_session = ort.InferenceSession(
