@@ -41,5 +41,7 @@ htmlcov/
 
 # Logs and test outputs
 *.log
+!results/**/*.log
+!results/*.log
 yolo_output.jpg
 examples/assets/*_output.jpg
