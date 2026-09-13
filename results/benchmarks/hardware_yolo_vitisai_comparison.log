@@ -1,0 +1,60 @@
+====================================================================================
+HARDWARE EXECUTION TRACE: IGNITION vs. AMD VITIS AI EP ON PHOENIX NPU SILICON
+====================================================================================
+Timestamp:       2026-09-12 22:59:10
+Platform:        AMD Ryzen 7 8700G with Radeon 780M Graphics
+Physical Device: [003d:00:01.1] NPU Phoenix AIE2 @ 1.80 GHz
+Workload:        YOLOv8n INT8 QDQ Cut Backbone (640x640)
+Iterations:      50 warmup / 500 steady-state
+------------------------------------------------------------------------------------
+
+EXECUTIVE PERFORMANCE COMPARISON MATRIX:
+------------------------------------------------------------------------------------
+Metric                           | AMD Vitis AI EP | Ignition (Sync) | Ignition (Async)
+------------------------------------------------------------------------------------
+Sustained Throughput (FPS)       | 96.47           | 23.06           | 27.39          
+End-to-End Latency Min (ms)      | 9.48            | 35.24           | 42.63          
+End-to-End Latency Median (ms)   | 10.32           | 42.80           | 71.37          
+End-to-End Latency Mean (ms)     | 10.36           | 43.37           | 72.75          
+End-to-End Latency P95 (ms)      | 10.96           | 49.35           | 87.05          
+Preprocess Time Mean (ms)        | 1.74            | 1.88            | 1.90           
+NPU Backbone Time Mean (ms)      | 6.61            | 34.07           | 36.48          
+Postprocess Time Mean (ms)       | 2.01            | 2.05            | 3.07           
+Host CPU Overhead (%)            | 7.3             | 58.0            | 79.9           
+Process Memory RSS (MB)          | 305.3           | 230.7           | 255.2          
+------------------------------------------------------------------------------------
+
+NUMERICAL PARITY & DETECTION AUDIT:
+------------------------------------------------------------------------------------
+Mean IoU (mIoU):          0.9766 (Threshold >= 0.95: PASS)
+Class Label Agreement:    True (100% agreement across all detected objects)
+Detected Objects Breakdown:
+  * person (IoU: 0.9800):
+      Vitis AI: score=0.818, box=[221.7, 408.1, 344.5, 855.6]
+      Ignition: score=0.881, box=[220.1, 406.9, 344.5, 853.7]
+  * person (IoU: 0.9903):
+      Vitis AI: score=0.777, box=[49.6, 397.1, 244.2, 903.5]
+      Ignition: score=0.881, box=[49.5, 399.9, 244.6, 902.5]
+  * person (IoU: 0.9794):
+      Vitis AI: score=0.777, box=[669.8, 381.3, 810.7, 880.3]
+      Ignition: score=0.881, box=[668.3, 376.3, 810.8, 880.2]
+  * bus (IoU: 0.9646):
+      Vitis AI: score=0.438, box=[23.4, 227.3, 797.0, 772.5]
+      Ignition: score=0.438, box=[25.5, 228.5, 786.8, 762.8]
+  * person (IoU: 0.9687):
+      Vitis AI: score=0.269, box=[-0.1, 551.8, 61.3, 864.2]
+      Ignition: score=0.378, box=[0.8, 549.7, 60.9, 865.1]
+------------------------------------------------------------------------------------
+
+RUNTIME FOOTPRINT & DEPENDENCY CONSUMPTION:
+------------------------------------------------------------------------------------
+AMD Vitis AI EP Stack:    4703.5 MB
+  - Ryzen AI 1.7.1 SDK:   4071.9 MB
+  - ONNX Runtime VitisAI: 614.5 MB
+  - VOE Package:          2.7 MB
+  - XCLBIN Compile Cache: 14.4 MB
+Ignition Runtime Stack:   262.4 MB
+  - Standalone Wheel:     65.3 KB
+  - PyXRT / Driver SDK:   262.3 MB
+Runtime Footprint Reduction: 94.4% smaller
+====================================================================================
