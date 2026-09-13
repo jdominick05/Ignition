@@ -200,3 +200,20 @@ def test_cli_detect_streaming_benchmark(assert_hardware_available):
     assert "Average Preprocessing Latency:" in result.output
     assert "Average Backbone NPU Latency:" in result.output
     assert "Average Postprocess/NMS Lat:" in result.output
+
+
+def test_model_stream_yolo_result(assert_hardware_available):
+    """
+    Tests high-level Model.stream(frame_iterator) yielding YOLOResult in real time.
+    """
+    from ignition.pipelines.yolo import YOLOResult
+    model = ignition.compile(YOLO_MODEL_PATH, backend="xdna1")
+
+    frames = [np.random.randint(0, 256, (360, 640, 3), dtype=np.uint8) for _ in range(5)]
+    results = list(model.stream(frames))
+
+    assert len(results) == 5
+    for res in results:
+        assert isinstance(res, YOLOResult)
+        assert hasattr(res, "detections")
+        assert hasattr(res, "timings_ms")
