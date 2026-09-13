@@ -38,5 +38,7 @@ ENV/
 .coverage
 htmlcov/
 
-# Logs
+# Logs and test outputs
 *.log
+yolo_output.jpg
+examples/assets/*_output.jpg
