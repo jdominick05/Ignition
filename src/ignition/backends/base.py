@@ -1,5 +1,5 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 src/ignition/backends/base.py
 Abstract base class and execution reports for Ignition inference backends.

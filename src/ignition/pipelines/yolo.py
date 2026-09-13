@@ -1,5 +1,5 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 src/ignition/pipelines/yolo.py
 End-to-end YOLOv8n object detection pipeline for AMD Phoenix XDNA1 / AIE2 silicon.
