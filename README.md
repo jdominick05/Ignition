@@ -183,7 +183,7 @@ Ignition/
 ├── tests/
 │   └── test_ignition_api.py   # Hardware verification & parity test suite
 ├── pyproject.toml             # Modern Setuptools / PEP 621 packaging
-├── LICENSE                    # Apache 2.0
+├── LICENSE                    # GNU Affero General Public License v3.0 (AGPL-3.0)
 └── README.md
 ```
 
@@ -191,4 +191,4 @@ Ignition/
 
 ## License
 
-Ignition is licensed under the [Apache License, Version 2.0](LICENSE).
+Ignition is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE).
