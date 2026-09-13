@@ -11,6 +11,7 @@ from .model import Model, Runner
 from .backends.base import BenchmarkReport, BaseBackend
 from .devices import probe_devices, get_default_device, DeviceInfo
 from .pipelines.yolo import YOLOPipeline, Detection, YOLOResult
+from .pipelines.streaming import AsyncYOLOPipeline
 
 __version__ = "0.1.0"
 
@@ -21,7 +22,7 @@ def compile(
     precision: str = "int8",
     pipeline: Optional[str] = None,
     **kwargs
-) -> Union[Model, YOLOPipeline]:
+) -> Union[Model, YOLOPipeline, AsyncYOLOPipeline]:
     """
     Compiles an ONNX model or partitioned graph for high-performance execution.
 
@@ -29,14 +30,16 @@ def compile(
         model: Path to ONNX model, ONNX ModelProto, or PartitionedGraph.
         backend: Execution target ('xdna1' for AMD Phoenix NPU, 'cpu' for ORT CPU reference).
         precision: Arithmetic precision ('int8' stationary vector layout).
-        pipeline: Optional specialized task pipeline (e.g. 'yolo').
+        pipeline: Optional specialized task pipeline ('yolo', 'async_yolo').
         **kwargs: Additional backend or pipeline configuration options.
 
     Returns:
-        Model or specialized pipeline (e.g. YOLOPipeline).
+        Model, YOLOPipeline, or AsyncYOLOPipeline.
     """
-    if pipeline == "yolo":
+    if pipeline in ("yolo", "sync_yolo"):
         return YOLOPipeline(model, backend=backend, **kwargs)
+    elif pipeline in ("async_yolo", "streaming_yolo", "stream_yolo", "streaming"):
+        return AsyncYOLOPipeline(model, backend=backend, **kwargs)
     return Model(model, backend=backend, precision=precision, **kwargs)
 
 
@@ -55,6 +58,7 @@ __all__ = [
     "Model",
     "Runner",
     "YOLOPipeline",
+    "AsyncYOLOPipeline",
     "Detection",
     "YOLOResult",
     "devices",

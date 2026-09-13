@@ -78,6 +78,18 @@ class Model:
         # 2. Dispatch to backend
         return self.backend.run(tensor)
 
+    def stream(
+        self,
+        frame_iterator: Any,
+        input_size: Optional[Tuple[int, int]] = None,
+    ):
+        """
+        Pipelined streaming inference over an input frame iterator.
+        Yields predictions in real time as each frame completes.
+        """
+        for item in frame_iterator:
+            yield self.predict(item, input_size=input_size)
+
     def benchmark(
         self,
         input_data: Optional[Union[str, Path, Any, np.ndarray]] = None,

@@ -7,8 +7,10 @@ Command-line interface for the Ignition AI engine.
 
 import sys
 import time
+from typing import Optional, List
 from pathlib import Path
 import click
+import cv2
 import numpy as np
 
 import ignition
@@ -103,21 +105,69 @@ def benchmark_model(model_path, backend, iterations, warmup, compare_cpu):
         click.echo("================================================================================")
 
 
+def _load_frame_stream(input_path: Path, max_frames: Optional[int] = None):
+    """Yields frames from an image file, image directory, or video."""
+    video_exts = {".mp4", ".avi", ".mkv", ".mov", ".webm"}
+    image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+    if input_path.is_dir():
+        files = sorted([p for p in input_path.iterdir() if p.suffix.lower() in image_exts])
+        if not files:
+            raise ValueError(f"No supported image files found in directory: {input_path}")
+        if max_frames:
+            files = files[:max_frames]
+        for p in files:
+            yield cv2.imread(str(p))
+    elif input_path.suffix.lower() in video_exts:
+        cap = cv2.VideoCapture(str(input_path))
+        if not cap.isOpened():
+            raise IOError(f"Cannot open video file: {input_path}")
+        count = 0
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                yield frame
+                count += 1
+                if max_frames and count >= max_frames:
+                    break
+        finally:
+            cap.release()
+    elif input_path.suffix.lower() in image_exts:
+        img = cv2.imread(str(input_path))
+        if img is None:
+            raise FileNotFoundError(f"Failed to load image: {input_path}")
+        if max_frames and max_frames > 1:
+            for _ in range(max_frames):
+                yield img
+        else:
+            yield img
+    else:
+        raise ValueError(f"Unsupported input format: {input_path}")
+
+
 @cli.command("detect")
 @click.argument("model_path", type=click.Path(exists=True))
-@click.option("--input", "-i", "input_path", type=click.Path(exists=True), required=True, help="Path to input image file.")
+@click.option("--input", "-i", "input_path", type=click.Path(exists=True), required=True, help="Path to input image file, video, or directory.")
 @click.option("--output", "-o", "output_path", default="yolo_output.jpg", type=str, help="Path to save annotated visual detection image.")
 @click.option("--backend", "-b", default="xdna1", type=click.Choice(["xdna1", "cpu"]), help="Execution target backend.")
 @click.option("--conf", "-c", default=0.25, type=float, help="Confidence score threshold (default: 0.25).")
 @click.option("--iou", default=0.45, type=float, help="NMS IoU threshold (default: 0.45).")
-def detect_objects(model_path, input_path, output_path, backend, conf, iou):
+@click.option("--stream", is_flag=True, default=False, help="Enable 3-stage asynchronous pipelined execution runner.")
+@click.option("--benchmark", is_flag=True, default=False, help="Profile sustained throughput and latency metrics across stream frames.")
+@click.option("--frames", default=100, type=int, help="Number of frames for benchmark mode (default: 100).")
+def detect_objects(model_path, input_path, output_path, backend, conf, iou, stream, benchmark, frames):
     """Execute end-to-end YOLOv8 object detection on AMD Phoenix AIE2 silicon or CPU."""
-    click.echo(f"[*] Compiling YOLOv8 detection pipeline on target '{backend.upper()}'...")
+    in_p = Path(input_path).resolve()
+    target_pipeline = "async_yolo" if stream else "yolo"
+    mode_str = "Async Pipelined" if stream else "Synchronous"
+    click.echo(f"[*] Compiling YOLOv8 {mode_str} detection pipeline on target '{backend.upper()}'...")
     try:
         pipeline = ignition.compile(
             model_path,
             backend=backend,
-            pipeline="yolo",
+            pipeline=target_pipeline,
             conf_thres=conf,
             iou_thres=iou,
         )
@@ -126,8 +176,50 @@ def detect_objects(model_path, input_path, output_path, backend, conf, iou):
         sys.exit(1)
 
     try:
-        click.echo(f"[*] Executing detection on '{Path(input_path).name}'...")
-        result = pipeline.predict(input_path, conf_thres=conf, iou_thres=iou)
+        if benchmark:
+            click.echo(f"[*] Benchmarking sustained streaming throughput over {frames} frames...")
+            frame_iter = _load_frame_stream(in_p, max_frames=frames)
+            t_start = time.perf_counter()
+            results = []
+            if hasattr(pipeline, "stream"):
+                stream_fn = pipeline.stream
+            else:
+                stream_fn = pipeline.predict
+            for res in pipeline.stream(frame_iter, conf_thres=conf, iou_thres=iou, annotate=False):
+                results.append(res)
+            t_end = time.perf_counter()
+            elapsed_s = t_end - t_start
+            fps = len(results) / elapsed_s if elapsed_s > 0 else 0.0
+
+            pre_lat = [r.timings_ms["preprocess_ms"] for r in results]
+            back_lat = [r.timings_ms["backbone_ms"] for r in results]
+            post_lat = [r.timings_ms["postprocess_ms"] for r in results]
+            tot_lat = [r.timings_ms["total_ms"] for r in results]
+
+            click.echo()
+            click.echo("================================================================================")
+            click.secho(f"Ignition Streaming Benchmark Report ({backend.upper()})", fg="cyan", bold=True)
+            click.echo("================================================================================")
+            click.echo(f"Total Stream Frames Processed: {len(results)}")
+            click.echo(f"Total Stream Elapsed Time:     {elapsed_s * 1000.0:.2f} ms")
+            click.secho(f"Sustained Pipelined Throughput: {fps:.2f} FPS", fg="green", bold=True)
+            click.echo(f"Average Preprocessing Latency:  {np.mean(pre_lat):.2f} ms")
+            click.echo(f"Average Backbone NPU Latency:  {np.mean(back_lat):.2f} ms")
+            click.echo(f"Average Postprocess/NMS Lat:   {np.mean(post_lat):.2f} ms")
+            click.echo(f"Median End-to-End Latency:     {np.median(tot_lat):.2f} ms")
+            click.echo(f"P95 End-to-End Latency:        {np.percentile(tot_lat, 95):.2f} ms")
+            click.echo("================================================================================")
+            return
+
+        click.echo(f"[*] Executing detection on '{in_p.name}'...")
+        if stream:
+            frame_iter = _load_frame_stream(in_p, max_frames=1)
+            results = list(pipeline.stream(frame_iter, conf_thres=conf, iou_thres=iou, annotate=True))
+            if not results:
+                raise RuntimeError("No results produced by streaming pipeline.")
+            result = results[0]
+        else:
+            result = pipeline.predict(in_p, conf_thres=conf, iou_thres=iou)
 
         # Save output image
         out_p = Path(output_path).resolve()

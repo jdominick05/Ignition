@@ -131,6 +131,9 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-x, dtype=np.float32))
 
 
+_bins_vec = np.arange(REG_MAX, dtype=np.float32).reshape(1, 1, REG_MAX, 1)
+
+
 def decode_heads(
     outs: List[np.ndarray],
     imgsz: int = INPUT_SIZE,
@@ -139,7 +142,8 @@ def decode_heads(
 ) -> np.ndarray:
     """
     Decodes the 6 raw conv head outputs into (1, 84, N) [xywh, class_probs] tensor.
-    Computes DFL (Distribution Focal Loss) expected values and anchor grid offsets in NumPy.
+    Vectorized DFL (Distribution Focal Loss) expected values and anchor grid offsets in NumPy
+    using strided views along the bin dimension to eliminate intermediate array allocations.
     """
     box_f, cls_f = outs[:3], outs[3:]
     nc = cls_f[0].shape[1]
@@ -162,10 +166,10 @@ def decode_heads(
     box = box.astype(np.float32, copy=False)
     n = box.shape[2]
 
-    # DFL: 16 bins per box side -> expected value
-    d = _softmax(box.reshape(1, 4, REG_MAX, n).transpose(0, 2, 1, 3).copy(), axis=1)
-    bins = np.arange(REG_MAX, dtype=np.float32).reshape(1, REG_MAX, 1, 1)
-    ltrb = (d * bins).sum(1)  # (1, 4, n) distances left, top, right, bottom
+    # Vectorized DFL: strided view (1, 4, 16, n) without transposing
+    v = box.reshape(1, 4, REG_MAX, n)
+    d = _softmax(v.copy(), axis=2)
+    ltrb = (d * _bins_vec).sum(axis=2)  # (1, 4, n) distances left, top, right, bottom
 
     x1y1 = anc - ltrb[:, 0:2]
     x2y2 = anc + ltrb[:, 2:4]
@@ -179,10 +183,14 @@ def decode_heads(
 def letterbox(
     img_bgr: np.ndarray,
     size: int = INPUT_SIZE,
-    color: Tuple[int, int, int] = (114, 114, 114)
+    color: Tuple[int, int, int] = (114, 114, 114),
+    canvas_buf: Optional[np.ndarray] = None,
+    out_tensor: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, Tuple[int, int], float]:
     """
     Resizes image preserving aspect ratio with symmetric stride-32 padding.
+    Accelerated with in-place OpenCV sub-slice resize and direct in-place tensor
+    packing into pinned buffers to eliminate intermediate memory allocations.
     Returns:
       x: (1, 3, size, size) float32 RGB array normalized to [0.0, 1.0]
       pad: (pad_top, pad_left)
@@ -191,20 +199,26 @@ def letterbox(
     h, w = img_bgr.shape[:2]
     scale = min(size / w, size / h)
     nw, nh = int(round(w * scale)), int(round(h * scale))
-    resized = cv2.resize(img_bgr, (nw, nh), interpolation=cv2.INTER_LINEAR)
-
     pad_top = (size - nh) // 2
     pad_left = (size - nw) // 2
 
-    canvas = np.full((size, size, 3), color, dtype=np.uint8)
-    canvas[pad_top:pad_top + nh, pad_left:pad_left + nw] = resized
+    canvas = canvas_buf if canvas_buf is not None else np.empty((size, size, 3), dtype=np.uint8)
+    canvas.fill(color[0])
+    sub = canvas[pad_top:pad_top + nh, pad_left:pad_left + nw]
+    cv2.resize(img_bgr, (nw, nh), dst=sub, interpolation=cv2.INTER_LINEAR)
 
-    # Convert BGR -> RGB and normalize to [0.0, 1.0]
-    rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
-    x = rgb.astype(np.float32) / 255.0
-    x = np.ascontiguousarray(x.transpose(2, 0, 1)[np.newaxis, ...])
+    if out_tensor is not None:
+        np.multiply(canvas[:, :, 2], 1.0 / 255.0, out=out_tensor[0, 0], casting="unsafe")
+        np.multiply(canvas[:, :, 1], 1.0 / 255.0, out=out_tensor[0, 1], casting="unsafe")
+        np.multiply(canvas[:, :, 0], 1.0 / 255.0, out=out_tensor[0, 2], casting="unsafe")
+        return out_tensor, (pad_top, pad_left), scale
 
-    return x, (pad_top, pad_left), scale
+    # Zero-allocation fallback
+    blob = np.empty((1, 3, size, size), dtype=np.float32)
+    np.multiply(canvas[:, :, 2], 1.0 / 255.0, out=blob[0, 0], casting="unsafe")
+    np.multiply(canvas[:, :, 1], 1.0 / 255.0, out=blob[0, 1], casting="unsafe")
+    np.multiply(canvas[:, :, 0], 1.0 / 255.0, out=blob[0, 2], casting="unsafe")
+    return blob, (pad_top, pad_left), scale
 
 
 def postprocess_detections(
@@ -445,6 +459,35 @@ class YOLOPipeline:
             orig_shape=orig_shape,
             image_annotated=annotated_img,
         )
+
+    def stream(
+        self,
+        frame_iterator: Any,
+        conf_thres: Optional[float] = None,
+        iou_thres: Optional[float] = None,
+        annotate: bool = False,
+    ):
+        """
+        Streams frames using the high-performance 3-stage asynchronous pipelined runner.
+        Overlaps preprocessing and postprocessing/NMS with physical silicon feature extraction.
+        """
+        from .streaming import AsyncYOLOPipeline
+        async_pipe = AsyncYOLOPipeline(
+            model_path=self.model_path,
+            backend=self.backend_name,
+            conf_thres=conf_thres if conf_thres is not None else self.conf_thres,
+            iou_thres=iou_thres if iou_thres is not None else self.iou_thres,
+            device_id=self.device_id,
+        )
+        try:
+            yield from async_pipe.stream(
+                frame_iterator=frame_iterator,
+                conf_thres=conf_thres,
+                iou_thres=iou_thres,
+                annotate=annotate,
+            )
+        finally:
+            async_pipe.close()
 
     def benchmark(
         self,
