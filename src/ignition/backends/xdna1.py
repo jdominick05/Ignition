@@ -67,6 +67,24 @@ class XDNA1Backend(BaseBackend):
 
         return self.session.run(input_tensor, unswizzle=True)
 
+    def run_async(self, input_tensor: np.ndarray, unswizzle: bool = True):
+        """
+        Asynchronously submits an inference request to the ERT ring buffer.
+        Returns a RunHandle whose wait() / result() retrieves the egress tensor.
+        """
+        if self.session is None:
+            raise RuntimeError("Model is not loaded. Call load() before run_async().")
+
+        return self.session.run_async(input_tensor, unswizzle=unswizzle)
+
+    def get_bo_buffers(self):
+        """
+        Returns the pre-allocated double-buffered host BO memory pool (ring_depth=2).
+        """
+        if self.session is None:
+            raise RuntimeError("Model is not loaded.")
+        return self.session.buffers
+
     def benchmark(
         self,
         input_tensor: Optional[np.ndarray] = None,
