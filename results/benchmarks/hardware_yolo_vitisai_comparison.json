@@ -1,0 +1,382 @@
+{
+  "timestamp": "2026-09-12 22:59:10",
+  "hardware": {
+    "device": "AMD Ryzen 7 8700G with Radeon 780M Graphics",
+    "npu": "[003d:00:01.1] NPU Phoenix AIE2 @ 1.80 GHz",
+    "host_os": "Windows 11 Build 26100"
+  },
+  "benchmark_config": {
+    "workload": "YOLOv8n INT8 QDQ Cut Backbone (640x640)",
+    "warmup_iterations": 50,
+    "steady_state_iterations": 500,
+    "conf_threshold": 0.25,
+    "iou_threshold": 0.45
+  },
+  "pipelines": {
+    "vitisai_ep": {
+      "engine": "AMD Vitis AI Execution Provider (VOE 1.7.1)",
+      "mode": "Synchronous",
+      "iterations": 500,
+      "warmup": 50,
+      "fps": 96.47,
+      "wall_time_sec": 5.183,
+      "latency_total_ms": {
+        "min": 9.48,
+        "median": 10.32,
+        "mean": 10.36,
+        "p95": 10.96
+      },
+      "latency_breakdown_ms": {
+        "preprocess_mean": 1.74,
+        "npu_backbone_mean": 6.61,
+        "postprocess_mean": 2.01
+      },
+      "resources": {
+        "peak_rss_mb": 305.33,
+        "process_cpu_pct": 57.0,
+        "system_cpu_pct": 7.3
+      },
+      "detections": [
+        {
+          "class_name": "person",
+          "class_id": 0,
+          "score": 0.8175745010375977,
+          "xyxy": [
+            221.72280883789062,
+            408.13995361328125,
+            344.4903869628906,
+            855.5778503417969
+          ]
+        },
+        {
+          "class_name": "person",
+          "class_id": 0,
+          "score": 0.7772998809814453,
+          "xyxy": [
+            49.56907653808594,
+            397.1366882324219,
+            244.2107696533203,
+            903.5182189941406
+          ]
+        },
+        {
+          "class_name": "person",
+          "class_id": 0,
+          "score": 0.7772998809814453,
+          "xyxy": [
+            669.7657470703125,
+            381.29827880859375,
+            810.6990814208984,
+            880.2848510742188
+          ]
+        },
+        {
+          "class_name": "bus",
+          "class_id": 5,
+          "score": 0.43782344460487366,
+          "xyxy": [
+            23.44775390625,
+            227.34542846679688,
+            796.9949951171875,
+            772.5073547363281
+          ]
+        },
+        {
+          "class_name": "person",
+          "class_id": 0,
+          "score": 0.26894140243530273,
+          "xyxy": [
+            -0.12308120727539062,
+            551.8499755859375,
+            61.348976135253906,
+            864.1548461914062
+          ]
+        }
+      ]
+    },
+    "ignition_sync": {
+      "engine": "Ignition Native Pipeline A",
+      "mode": "Synchronous",
+      "iterations": 500,
+      "warmup": 50,
+      "fps": 23.06,
+      "wall_time_sec": 21.686,
+      "latency_total_ms": {
+        "min": 35.24,
+        "median": 42.8,
+        "mean": 43.37,
+        "p95": 49.35
+      },
+      "latency_breakdown_ms": {
+        "preprocess_mean": 1.88,
+        "npu_backbone_mean": 34.07,
+        "postprocess_mean": 2.05
+      },
+      "resources": {
+        "peak_rss_mb": 230.72,
+        "process_cpu_pct": 822.1,
+        "system_cpu_pct": 58.0
+      },
+      "detections": [
+        {
+          "class_name": "person",
+          "class_id": 0,
+          "score": 0.8807970285415649,
+          "xyxy": [
+            49.49413299560547,
+            399.9019775390625,
+            244.5634536743164,
+            902.4888000488281
+          ]
+        },
+        {
+          "class_name": "person",
+          "class_id": 0,
+          "score": 0.8807970285415649,
+          "xyxy": [
+            220.0915985107422,
+            406.9264831542969,
+            344.46871185302734,
+            853.7062072753906
+          ]
+        },
+        {
+          "class_name": "person",
+          "class_id": 0,
+          "score": 0.8807970285415649,
+          "xyxy": [
+            668.3390502929688,
+            376.3168029785156,
+            810.7955017089844,
+            880.2289733886719
+          ]
+        },
+        {
+          "class_name": "bus",
+          "class_id": 5,
+          "score": 0.43782344460487366,
+          "xyxy": [
+            25.5213623046875,
+            228.48141479492188,
+            786.7861938476562,
+            762.8415222167969
+          ]
+        },
+        {
+          "class_name": "person",
+          "class_id": 0,
+          "score": 0.3775406777858734,
+          "xyxy": [
+            0.791961669921875,
+            549.66943359375,
+            60.921932220458984,
+            865.0974731445312
+          ]
+        }
+      ]
+    },
+    "ignition_async": {
+      "engine": "Ignition 3-Stage Pipeline B",
+      "mode": "Asynchronous Concurrent",
+      "iterations": 500,
+      "warmup": 50,
+      "fps": 27.39,
+      "wall_time_sec": 18.257,
+      "latency_total_ms": {
+        "min": 42.63,
+        "median": 71.37,
+        "mean": 72.75,
+        "p95": 87.05
+      },
+      "latency_breakdown_ms": {
+        "preprocess_mean": 1.9,
+        "npu_backbone_mean": 36.48,
+        "postprocess_mean": 3.07
+      },
+      "resources": {
+        "peak_rss_mb": 255.16,
+        "process_cpu_pct": 1176.6,
+        "system_cpu_pct": 79.9
+      },
+      "detections": [
+        {
+          "class_name": "person",
+          "class_id": 0,
+          "score": 0.8807970285415649,
+          "xyxy": [
+            49.49413299560547,
+            399.9019775390625,
+            244.5634536743164,
+            902.4888000488281
+          ]
+        },
+        {
+          "class_name": "person",
+          "class_id": 0,
+          "score": 0.8807970285415649,
+          "xyxy": [
+            220.0915985107422,
+            406.9264831542969,
+            344.46871185302734,
+            853.7062072753906
+          ]
+        },
+        {
+          "class_name": "person",
+          "class_id": 0,
+          "score": 0.8807970285415649,
+          "xyxy": [
+            668.3390502929688,
+            376.3168029785156,
+            810.7955017089844,
+            880.2289733886719
+          ]
+        },
+        {
+          "class_name": "bus",
+          "class_id": 5,
+          "score": 0.43782344460487366,
+          "xyxy": [
+            25.5213623046875,
+            228.48141479492188,
+            786.7861938476562,
+            762.8415222167969
+          ]
+        },
+        {
+          "class_name": "person",
+          "class_id": 0,
+          "score": 0.3775406777858734,
+          "xyxy": [
+            0.791961669921875,
+            549.66943359375,
+            60.921932220458984,
+            865.0974731445312
+          ]
+        }
+      ]
+    }
+  },
+  "parity": {
+    "mIoU": 0.9766,
+    "class_label_agreement": true,
+    "parity_assert_pass": true,
+    "evaluated_pairs": [
+      {
+        "vitis_class": "person",
+        "vitis_score": 0.8175745010375977,
+        "vitis_box": [
+          221.7,
+          408.1,
+          344.5,
+          855.6
+        ],
+        "ignition_class": "person",
+        "ignition_score": 0.8807970285415649,
+        "ignition_box": [
+          220.1,
+          406.9,
+          344.5,
+          853.7
+        ],
+        "iou": 0.98,
+        "class_match": true
+      },
+      {
+        "vitis_class": "person",
+        "vitis_score": 0.7772998809814453,
+        "vitis_box": [
+          49.6,
+          397.1,
+          244.2,
+          903.5
+        ],
+        "ignition_class": "person",
+        "ignition_score": 0.8807970285415649,
+        "ignition_box": [
+          49.5,
+          399.9,
+          244.6,
+          902.5
+        ],
+        "iou": 0.9903,
+        "class_match": true
+      },
+      {
+        "vitis_class": "person",
+        "vitis_score": 0.7772998809814453,
+        "vitis_box": [
+          669.8,
+          381.3,
+          810.7,
+          880.3
+        ],
+        "ignition_class": "person",
+        "ignition_score": 0.8807970285415649,
+        "ignition_box": [
+          668.3,
+          376.3,
+          810.8,
+          880.2
+        ],
+        "iou": 0.9794,
+        "class_match": true
+      },
+      {
+        "vitis_class": "bus",
+        "vitis_score": 0.43782344460487366,
+        "vitis_box": [
+          23.4,
+          227.3,
+          797.0,
+          772.5
+        ],
+        "ignition_class": "bus",
+        "ignition_score": 0.43782344460487366,
+        "ignition_box": [
+          25.5,
+          228.5,
+          786.8,
+          762.8
+        ],
+        "iou": 0.9646,
+        "class_match": true
+      },
+      {
+        "vitis_class": "person",
+        "vitis_score": 0.26894140243530273,
+        "vitis_box": [
+          -0.1,
+          551.8,
+          61.3,
+          864.2
+        ],
+        "ignition_class": "person",
+        "ignition_score": 0.3775406777858734,
+        "ignition_box": [
+          0.8,
+          549.7,
+          60.9,
+          865.1
+        ],
+        "iou": 0.9687,
+        "class_match": true
+      }
+    ]
+  },
+  "runtime_footprints": {
+    "vitisai_stack": {
+      "ryzen_ai_sdk_mb": 4071.9,
+      "onnxruntime_vitisai_ep_mb": 614.5,
+      "voe_package_mb": 2.7,
+      "xclbin_cache_mb": 14.4,
+      "total_stack_mb": 4703.5
+    },
+    "ignition_stack": {
+      "standalone_wheel_kb": 65.3,
+      "pyxrt_driver_sdk_mb": 262.3,
+      "total_stack_mb": 262.4
+    },
+    "footprint_reduction_pct": 94.4
+  }
+}

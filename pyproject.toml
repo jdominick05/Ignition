@@ -49,3 +49,9 @@ where = ["src"]
 [tool.setuptools.package-data]
 "ignition.assets" = ["*.xclbin", "*.bin"]
 
+[tool.pytest.ini_options]
+testpaths = [
+    "tests/test_ignition_api.py",
+    "tests/test_async_pipeline.py",
+]
+
