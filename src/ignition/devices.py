@@ -1,5 +1,5 @@
 # Copyright (C) 2026 Advanced Micro Devices, Inc.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """
 src/ignition/devices.py
 Hardware discovery and topology inspection for AMD Ryzen AI XDNA1 NPUs.
