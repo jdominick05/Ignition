@@ -34,7 +34,7 @@ Measurements captured on physical AMD Phoenix NPU silicon (`AMD Ryzen 7 8700G AP
 
 ### 2. Full-Pipeline YOLOv8n End-to-End Silicon Benchmark
 
-End-to-end 640×640 INT8 QDQ YOLOv8n object detection pipeline benchmarked across 500 steady-state iterations (see full engineering report in [`benchmarks/vitisai_vs_ignition_yolo.md`](benchmarks/vitisai_vs_ignition_yolo.md)):
+End-to-end 640×640 INT8 QDQ YOLOv8n object detection pipeline benchmarked across 500 steady-state iterations on physical Phoenix silicon (`Ryzen 7 8700G [003d:00:01.1]`):
 
 | Metric | AMD ONNX Runtime Vitis AI EP | Ignition (Pipeline A: Sync) | Ignition (Pipeline B: 3-Stage Async) | Advantage / Feature |
 |---|:---:|:---:|:---:|---|
@@ -197,20 +197,10 @@ Ignition/
 │       │   ├── yolo.py        # YOLOv8 end-to-end decode, NMS, visualizer
 │       │   └── streaming.py   # 3-stage async pipelined execution runner
 │       └── cli/
-│           └── main.py        # Click CLI (devices, run, benchmark)
-├── benchmarks/
-│   ├── benchmark_yolo_vitisai.py   # Multi-engine physical silicon benchmark harness
-│   └── vitisai_vs_ignition_yolo.md # Full-pipeline benchmark report
-├── results/
-│   └── benchmarks/            # Raw execution traces and structured JSON
+│           └── main.py        # Click CLI (devices, run, benchmark, detect)
 ├── examples/
-│   └── quickstart.py          # 10-line runnable inference example
-├── tests/
-│   ├── test_ignition_api.py   # Hardware verification & parity test suite
-│   └── test_async_pipeline.py # 3-stage concurrency and throughput tests
-├── scripts/
-│   ├── check_links.py         # Markdown link verification audit
-│   └── release.sh             # Multi-remote packaging and release script
+│   ├── quickstart.py          # 10-line runnable inference example
+│   └── yolo_vision_demo.py    # Physical silicon YOLOv8 streaming vision demo
 ├── pyproject.toml             # Modern Setuptools / PEP 621 packaging
 ├── LICENSE                    # GNU Affero General Public License v3.0 (AGPL-3.0)
 └── README.md
