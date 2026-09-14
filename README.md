@@ -160,6 +160,8 @@ python live_ignition.py --source clip.mp4 --model ../ignite-xdna/models/yolov8n_
 
 The default model is ignite-xdna's graph-engine container `build/yolov8n_full.ignite`, falling back to `build/yolov8n.ignite`, which carries no detect heads and therefore draws no boxes. Glass-to-glass (G2G) is timed from the frame in memory to its detections; drawing and display come after it.
 
+Measured on a Ryzen 7 8700G (NPU Device 0) with a 640x480 webcam and 5 to 6 detected objects per frame: `--headless --frames 300` averaged 7.82 and 7.87 ms G2G in two runs (P99 8.18 and 8.58 ms), of which 7.14 to 7.19 ms is the NPU dispatch and 0.27 ms decode and NMS. A 500-frame run averaged 8.02 ms, and `--fresh` (every frame a new camera frame) 8.03 ms.
+
 ---
 
 ## Architectural Overview
