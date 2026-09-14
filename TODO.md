@@ -20,6 +20,8 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   `npu` extra with ignite-xdna's wheel adds the NPU path.
 - [x] **v0.3.1 release** (tag at `7d65d06`): both wheels, the sdist and SHA-256 sums on GitHub and GitLab, with
   [notes](docs/releases/v0.3.1.md); every file was downloaded back from both hosts and matched the sums.
+- [x] **Honest backends:** an `.onnx` model runs on ONNX Runtime's CPU execution provider with no NPU call, and
+  says so; `ignition devices` prints only what `pyxrt` reports (name, BDF, XRT and NPU driver versions).
 
 ## Active
 
@@ -75,18 +77,9 @@ ignite-xdna `results/model_zoo/` on that branch, G2G means:
 - [ ] Move the suite runner into Ignition as one command that writes a JSON record per model.
 - [ ] yolo11n_no_c2psa finds nothing on `bus.jpg` (C2PSA removed), so check it detects before lowering it.
   ResNet50 has no `.ignite` lowering yet.
-- [ ] SESR M7 dispatch is 4.25 ms against a 1.5 ms target, with a 2.53 ms non-compute floor (§7).
+- [ ] SESR M7 dispatch is 4.25 ms against a 1.5 ms target, with a 2.53 ms non-compute floor (§6).
 
-### 4. Honest backends
-
-- [ ] For an `.onnx` model with `backend="xdna1"` (the default of `ignition.compile` and `ignition detect`),
-  `YOLOPipeline` loads ignite-xdna's layer backend and calls it once per frame. It discards the output,
-  swallows any exception, and takes boxes from ONNX Runtime. Drop the call, or time it as a separate
-  stage, and state that this path runs on the CPU.
-- [ ] `ignition devices` prints a fixed device name, core count, tile clock, MemTile SRAM and INT8 TOPS. Print
-  only what `pyxrt` reports.
-
-### 5. Release and distribution
+### 4. Release and distribution
 
 - [ ] Add installing from a release page to the README's Install section, beside the editable checkouts.
 - [ ] ignite-xdna is on no package index, so the `npu` extra resolves only with its wheel beside Ignition's.
@@ -96,7 +89,7 @@ ignite-xdna `results/model_zoo/` on that branch, G2G means:
 - [ ] The published v0.2.0 notes still quote the figures v0.3.1 corrects. Decide whether to edit them.
 - **Done when:** the README's install commands, copied from a release page, work in a fresh environment.
 
-### 6. Hardware and Python coverage
+### 5. Hardware and Python coverage
 
 Only Phoenix on Windows 11 with Python 3.13 is verified ([README](README.md#compatibility)).
 
@@ -105,7 +98,7 @@ Only Phoenix on Windows 11 with Python 3.13 is verified ([README](README.md#comp
 - [ ] The package declares Python 3.10 or later, but the XRT SDK's `pyxrt` is built for 3.13. Test the CPU
   install on 3.10–3.12 and state that the NPU path needs the Python `pyxrt` was built for.
 
-### 7. NPU dispatch time (ignite-xdna)
+### 6. NPU dispatch time (ignite-xdna)
 
 AMD's NPU stage is about 0.8 ms faster than Ignition's on the same model and image (`d42d33e`). Most of
 Ignition's dispatch is activations moving between host memory and the NPU: 5.37 ms of a 7.39 ms dispatch with

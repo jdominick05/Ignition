@@ -112,9 +112,8 @@ def main():
     if devices:
         dev = devices[0]
         print(f"Hardware Target:    {dev.name} ({dev.bdf})")
-        print(f"AIE2 Compute Array: {dev.num_cores} Cores @ {dev.tile_clock_ghz:.2f} GHz")
-        print(f"On-Chip L2 Memory:  {dev.memtile_sram_kb} KB MemTile SRAM")
-        print(f"Peak Compute:       {dev.peak_int8_tops:.2f} INT8 TOPS")
+        print(f"XRT:                {dev.xrt_version or 'not reported'}")
+        print(f"NPU Driver:         {dev.driver_version or 'not reported'}")
     else:
         print("Hardware Target:    Standard Host Processor")
 

@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """
 src/ignition/pipelines/streaming.py
-High-performance 3-stage asynchronous pipelined execution runner for Ignition on AMD Phoenix silicon.
-Overlaps host CPU preprocessing (letterbox + INT8 quant scaling) and dynamic head decode/NMS
-with physical AIE2 NPU backbone execution across the ERT ring buffer.
+3-stage asynchronous runner for an ONNX YOLOv8 model on ONNX Runtime's CPU execution provider.
+Overlaps letterbox preprocessing, inference and head decode/NMS in three threads. The NPU is not
+used: an .ignite container runs through YOLOPipeline instead.
 """
 
 from typing import List, Tuple, Dict, Any, Optional, Union, Iterable, Iterator
@@ -29,9 +29,9 @@ from .yolo import (
     postprocess_detections,
     draw_detections,
     is_ignite_container,
+    note_onnx_runs_on_cpu,
 )
 from ..backends.base import BenchmarkReport
-from ..backends.xdna1 import XDNA1Backend
 
 
 _SENTINEL = object()
@@ -93,10 +93,9 @@ class AsyncYOLOPipeline:
         directly into static pinned host memory.
       - Pushes to npu_queue (bounded maxsize=2).
 
-    Stage 2: Silicon Dispatcher Thread
+    Stage 2: Inference Thread
       - Pulls preprocessed buffers from npu_queue.
-      - Dispatches asynchronous inference via XDNA1Backend.run_async() across ERT ring.
-      - Executes feature backbone inference and awaits hardware completion.
+      - Runs the model on ONNX Runtime's CPU execution provider.
       - Pushes to nms_queue (bounded maxsize=2).
 
     Stage 3: Consumer / Postprocess Thread
@@ -112,7 +111,6 @@ class AsyncYOLOPipeline:
         conf_thres: float = 0.25,
         iou_thres: float = 0.45,
         device_id: int = 0,
-        num_cores: int = 16,
         ring_depth: int = 2,
         **backend_kwargs
     ):
@@ -121,7 +119,6 @@ class AsyncYOLOPipeline:
         self.conf_thres = conf_thres
         self.iou_thres = iou_thres
         self.device_id = device_id
-        self.num_cores = num_cores
         self.ring_depth = max(2, ring_depth)
         self._closed = False
 
@@ -148,14 +145,9 @@ class AsyncYOLOPipeline:
         self.input_name = self.ort_session.get_inputs()[0].name
         self.output_names = [o.name for o in self.ort_session.get_outputs()]
 
-        # 2. Initialize XDNA1 AIE2 Hardware Engine if requested
-        self.hw_backend: Optional[XDNA1Backend] = None
-        if self.backend_name == "xdna1":
-            try:
-                self.hw_backend = XDNA1Backend(device_id=self.device_id, num_cores=self.num_cores)
-                self.hw_backend.load(str(self.model_path), ring_depth=self.ring_depth, **backend_kwargs)
-            except Exception:
-                self.hw_backend = None
+        # 2. An ONNX model never reaches the NPU: only an .ignite container does
+        note_onnx_runs_on_cpu(self.model_path, self.backend_name)
+        self.backend_name = "cpu"
 
         # 3. Static Token Pool & Bounded Intermediate Queues
         # Strictly bounded maxsize=2 to prevent host memory bloat and L3 cache thrashing
@@ -216,8 +208,8 @@ class AsyncYOLOPipeline:
         finally:
             self.npu_queue.put(_SENTINEL)
 
-    def _stage2_npu_worker(self):
-        """Stage 2: Dispatches asynchronous inference across physical silicon ERT ring."""
+    def _stage2_inference_worker(self):
+        """Stage 2: Runs the model on ONNX Runtime's CPU execution provider."""
         try:
             while not self._stop_event.is_set():
                 item = self.npu_queue.get()
@@ -231,13 +223,7 @@ class AsyncYOLOPipeline:
                 token: FrameToken = item
                 token.t2_start = time.perf_counter()
 
-                # Asynchronous physical silicon dispatch
-                if self.hw_backend is not None:
-                    run_handle = self.hw_backend.run_async(token.inp_tensor)
-                    raw_outputs = self.ort_session.run(None, {self.input_name: token.inp_tensor})
-                    _ = run_handle.wait(timeout_ms=3000)
-                else:
-                    raw_outputs = self.ort_session.run(None, {self.input_name: token.inp_tensor})
+                raw_outputs = self.ort_session.run(None, {self.input_name: token.inp_tensor})
 
                 token.t2_end = time.perf_counter()
                 token.raw_outputs = raw_outputs
@@ -306,6 +292,7 @@ class AsyncYOLOPipeline:
                     timings_ms=timings,
                     orig_shape=token.orig_shape,
                     image_annotated=annotated,
+                    head_source="onnxruntime",
                 )
 
                 # Return token to pool for reuse
@@ -354,9 +341,9 @@ class AsyncYOLOPipeline:
             name="Ignition-Preprocess-Stage1"
         )
         t2 = threading.Thread(
-            target=self._stage2_npu_worker,
+            target=self._stage2_inference_worker,
             daemon=True,
-            name="Ignition-NPU-Stage2"
+            name="Ignition-Inference-Stage2"
         )
         t3 = threading.Thread(
             target=self._stage3_nms_worker,
@@ -402,7 +389,7 @@ class AsyncYOLOPipeline:
         synthetic_shape: Tuple[int, int, int] = (720, 1280, 3)
     ) -> BenchmarkReport:
         """
-        Profiles sustained pipelined throughput (FPS) and latency on physical Phoenix silicon.
+        Profiles sustained pipelined throughput (FPS) and latency on the CPU.
         """
         # Generate synthetic frames
         warmup_frames = [np.random.randint(0, 256, synthetic_shape, dtype=np.uint8) for _ in range(warmup)]
@@ -436,12 +423,9 @@ class AsyncYOLOPipeline:
         )
 
     def close(self):
-        """Releases underlying hardware backend and worker threads."""
+        """Stops the worker threads; safe to call again."""
         if not self._closed:
             self._stop_event.set()
-            if self.hw_backend is not None:
-                self.hw_backend.teardown()
-                self.hw_backend = None
             self._closed = True
 
     def __enter__(self):

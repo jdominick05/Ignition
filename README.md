@@ -208,8 +208,6 @@ These stage times come from the webcam re-check above: 640×480 frames with 5.43
 - **A build step.** The `.ignite` container is built from AMD Quark's quantized model with ignite-xdna and the mlir-aie toolchain; it is not a pip install.
 - **Narrow hardware support.** Only Phoenix has been verified. Hawk Point is untested, and Strix-class NPUs and Linux are not supported.
 - **The camera limits live frame rate.** On the test webcam that is 15 fps through DirectShow; see [TODO.md](TODO.md#1-camera-rate-30-fps-from-the-webcam).
-- **An unused call on the ONNX path.** `ignition.compile` and `ignition detect` default to `backend="xdna1"`, which on an `.onnx` model adds an NPU call whose output is not used. Pass `--backend cpu` ([TODO.md](TODO.md#4-honest-backends)).
-
 Open work is tracked in [TODO.md](TODO.md).
 
 ## Project layout
