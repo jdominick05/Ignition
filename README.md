@@ -1,4 +1,14 @@
-# Ignition
+``` 
+ (                                  
+ )\ )                )              
+(()/((  (      (  ( /((             
+ /(_))\))( (   )\ )\())\  (   (     
+(_))((_))\ )\ |(_|_))((_) )\  )\ )  
+|_ _|(()(_)(_/((_) |_ (_)((_)_(_/(  
+ | |/ _` | ' \)) |  _|| / _ \ ' \)) 
+|___\__, |_||_||_|\__||_\___/_||_|  
+    |___/                               
+```
 
 **Real-time object detection on the AMD Ryzen™ AI NPU: faster end to end than AMD's own runtime, from a fraction of the install size.**
 
