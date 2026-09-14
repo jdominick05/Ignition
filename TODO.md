@@ -35,20 +35,24 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   over 6,000 synthetic trials, 312 recorded and 340 live frames. Live decode and NMS medians fell from
   0.28–0.29 ms to 0.044–0.045 ms with about 5 objects in view. The README's AMD comparison and re-check rows were
   re-run on it.
+- [x] **Model zoo engine on ignite-xdna `main`** (ignite-xdna `6bd2718`): the YOLOv8s and SESR M7 engine work is
+  merged with the native decode. Containers rebuilt from the merge were exact on every layer on Device 0, the
+  YOLOv8n container compiled before the model zoo still runs on it within 0.07 ms of the rebuilt one, YOLOv8s
+  decodes natively (0.041 ms against 0.316 ms), and Ignition's `model-zoo` branch ran YOLOv8n, YOLOv8s and
+  SESR M7 at 7.68, 17.15 and 6.64 ms mean glass-to-glass (ignite-xdna `results/aie/model_zoo_main_phoenix_20260914T2209Z.log`).
 
 ## Active
 
 ### 1. Model zoo in Ignition
 
-Two unlanded branches hold this work, and neither fast-forwards onto its `main` any more:
+ignite-xdna's `main` compiles YOLOv8s and SESR M7 to `.ignite` and runs them on Device 0 (merge `6bd2718`). The
+Ignition side is still a branch that no longer fast-forwards onto `main`:
 
-- **ignite-xdna `worktree-model-zoo`** (`91d0d7e`, `939a4f2`, `a356b30`, forked from `684e9ed`) compiles
-  YOLOv8s and SESR M7 to `.ignite` and runs them on Device 0.
 - **Ignition `model-zoo`** (`3cf2c49`, forked from `e3a6fcf`) makes `live_ignition.py` task-aware (`--task`,
   `--json`), with classification and super-resolution pipelines.
 
-ignite-xdna's `tools/model_zoo_bench.py` drives Ignition for the suites. Measured 2026-09-14, logs in
-ignite-xdna `results/model_zoo/` on that branch, G2G means:
+ignite-xdna's `tools/model_zoo_bench.py` drives Ignition for the suites. Measured 2026-09-14 on the branch
+before the merge, logs in ignite-xdna `results/model_zoo/`, G2G means:
 
 | Model | ONNX Runtime CPU, 300 frames | NPU through Ignition |
 |---|---:|---:|
@@ -57,9 +61,11 @@ ignite-xdna `results/model_zoo/` on that branch, G2G means:
 | SESR M7 | 15.58 ms | 6.57 ms |
 | ResNet50 | 34.24 ms | — |
 
-- [ ] Land ignite-xdna `worktree-model-zoo` on its `main` (Ignition's super-resolution path imports
-  `pipelines/sr_pipeline.py`, which only that branch has), then raise the `npu` extra's minimum to the first
-  ignite-xdna version that ships it.
+On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.64 ms, in a separate sitting
+(ignite-xdna `results/aie/model_zoo_main_phoenix_20260914T2209Z.log`).
+
+- [ ] Raise the `npu` extra's minimum to the first ignite-xdna release that ships `pipelines/sr_pipeline.py`,
+  which Ignition's super-resolution path imports; no ignite-xdna release has it yet.
 - [ ] Replay Ignition `model-zoo` onto `main`, land it, and document `--task` and `--json` in the README.
 - [ ] Move the suite runner into Ignition as one command that writes a JSON record per model.
 - [ ] yolo11n_no_c2psa finds nothing on `bus.jpg` (C2PSA removed), so check it detects before lowering it.
