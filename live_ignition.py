@@ -1,26 +1,34 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: AGPL-3.0-or-later
-r"""Live YOLOv8n object detection on the AMD Phoenix NPU (XDNA1) from a webcam, video or image.
+r"""Live inference on the AMD Phoenix NPU (XDNA1) or ONNX Runtime from a webcam, video or image.
 
-    python live_ignition.py                                # webcam 0 in a window
+    python live_ignition.py                                # YOLOv8n on webcam 0 in a window
     python live_ignition.py --headless --frames 300        # benchmark: G2G mean, P50, P95, P99
     python live_ignition.py --source clip.mp4 --model ..\ignite-xdna\models\yolov8n_cut_xint8.onnx
+    python live_ignition.py --model ..\ignite-xdna\models\sesr_m7_xint8.onnx --headless --frames 300 --json sesr.json
 
 Run it in the mlir-aie-iron conda environment, where pyxrt loads.
 
-The model picks the backend. A bare-metal .ignite container runs the whole
-network on NPU Device 0 through ignite-xdna and decodes boxes from the NPU's
-detect heads; ONNX Runtime is not called. An .onnx model runs on ONNX Runtime
-(CPU). The default model is ignite-xdna's graph-engine container
-build\yolov8n_full.ignite when it exists, otherwise build\yolov8n.ignite, which
-carries no detect heads and so draws no boxes (a warning says so).
+The model picks the backend and the task. A bare-metal .ignite container runs the
+whole network on NPU Device 0 through ignite-xdna; ONNX Runtime is not called. An
+.onnx model runs on ONNX Runtime (CPU). The task comes from the container
+manifest or the ONNX output shapes (--task overrides it):
+  detect            YOLO (six head-cut outputs or one (1, 84, N) tensor): boxes, labels, scores
+  classify          one (1, N) output, e.g. ResNet50: timm eval preprocessing, top-5
+  super_resolution  one image output a whole multiple of the input size, e.g. SESR M7 (2x)
+The default model is ignite-xdna's graph-engine container build\yolov8n_full.ignite
+when it exists, otherwise build\yolov8n.ignite, which carries no detect heads and so
+draws no boxes (a warning says so).
 
-Glass-to-glass (G2G) is timed from the moment the loop takes a frame to the
-moment its detections exist: preprocessing, NPU dispatch, head readback, decode
-and NMS. Drawing and display come after it. A capture thread owns the camera
-(ThreadedCamera), so USB sensor I/O never stalls the inference loop: the loop
-runs on the newest frame, or with --fresh waits for each new one.
+Glass-to-glass (G2G) is timed from the moment the loop takes a frame to the moment
+its output exists: preprocessing, the network, and decoding (NMS, top-k, or the
+upscaled image). Drawing and display come after it. A capture thread owns the camera
+(ThreadedCamera), so USB sensor I/O never stalls the inference loop: the loop runs on
+the newest frame, or with --fresh waits for each new one.
+
+--json PATH writes the run's summary (latency percentiles, stage means, RSS drift,
+host) as one JSON object, for tools that compare models.
 
 Stop with q or ESC in the window, by closing the window, or with Ctrl+C /
 Ctrl+Break. Every path releases the camera, closes the window and releases the
@@ -33,13 +41,15 @@ import os
 os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")
 
 import argparse
+import json
 import logging
+import platform
 import signal
 import sys
 import threading
 import time
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT / "src") not in sys.path:
@@ -48,14 +58,16 @@ if str(ROOT / "src") not in sys.path:
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
-from ignition.pipelines.yolo import YOLOPipeline, YOLOResult, draw_detections, is_ignite_container  # noqa: E402
+from ignition.pipelines.vision import (  # noqa: E402
+    TASK_CLASSIFY, TASK_DETECT, TASK_SUPER_RESOLUTION, TASKS, create_pipeline, infer_task)
+from ignition.pipelines.yolo import draw_detections, is_ignite_container  # noqa: E402
 
 try:
     import psutil
 except ImportError:  # the ironenv venv has no psutil; rss_mb falls back to the Win32 API
     psutil = None
 
-WINDOW_NAME = "Ignition YOLOv8n - AMD Phoenix NPU"
+WINDOW_NAME = "Ignition - AMD Phoenix NPU"
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 Frame = Tuple[Optional[np.ndarray], int, float]
 
@@ -301,30 +313,70 @@ class StopRequest:
                 signal.signal(sig, self._handle)
 
 
-def render(canvas: np.ndarray, result: YOLOResult, fps: float, backend: str, source: str) -> None:
-    """Boxes, class labels, scores and the latency HUD, drawn in place."""
-    draw_detections(canvas, result.detections, inplace=True)
+def output_source(task: str, result: Any) -> str:
+    """Where the frame's output came from: ``npu``, ``onnxruntime`` or ``none``."""
+    return (result.head_source if task == TASK_DETECT else result.source) or "none"
+
+
+def output_count(task: str, result: Any) -> str:
+    if task == TASK_DETECT:
+        return f"{len(result.detections)} objects"
+    if task == TASK_CLASSIFY:
+        top = result.topk[0]
+        return f"top-1 class {top.class_id} ({top.score:.2f})"
+    return f"{result.image.shape[1]}x{result.image.shape[0]} output"
+
+
+def render(frame: np.ndarray, display: Optional[np.ndarray], task: str, result: Any, fps: float,
+           backend: str, source: str) -> np.ndarray:
+    """The image to show: boxes on the frame, the top-5 over the frame, or the upscaled frame; plus the HUD."""
+    if task == TASK_SUPER_RESOLUTION:
+        canvas = result.image.copy()
+    else:
+        if display is None or display.shape != frame.shape:
+            display = np.empty_like(frame)
+        np.copyto(display, frame)  # draw on a copy: the next loop may reuse this frame
+        canvas = display
     t = result.timings_ms
-    stage = "ORT" if result.head_source == "onnxruntime" else "NPU"
+    stage = "ORT" if output_source(task, result) == "onnxruntime" else "NPU"
     lines = [
         f"G2G {t.get('g2g_ms', t['total_ms']):5.2f} ms  {stage} {t.get('backbone_ms', 0.0):5.2f} ms  "
-        f"{fps:5.1f} FPS  {len(result.detections)} objects",
-        f"{backend} | boxes: {result.head_source} | {source}",
+        f"{fps:5.1f} FPS  {output_count(task, result)}",
+        f"{backend} | {task}: {output_source(task, result)} | {source}",
     ]
+    if task == TASK_DETECT:
+        draw_detections(canvas, result.detections, inplace=True)
+    elif task == TASK_CLASSIFY:
+        lines += [f"class {c.class_id:4d}  p={c.score:.3f}" for c in result.topk]
     cv2.rectangle(canvas, (0, 0), (canvas.shape[1], 12 + 20 * len(lines)), (0, 0, 0), -1)
     for i, text in enumerate(lines):
         cv2.putText(canvas, text, (8, 20 + 20 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
                     (0, 255, 0) if i == 0 else (220, 220, 220), 1, cv2.LINE_AA)
     cv2.putText(canvas, "q / ESC: quit", (8, canvas.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
                 (220, 220, 220), 1, cv2.LINE_AA)
+    return canvas
+
+
+def host_info() -> Dict[str, Any]:
+    info: Dict[str, Any] = {"hostname": platform.node(), "processor": platform.processor(),
+                            "python": platform.python_version(), "numpy": np.__version__,
+                            "opencv": cv2.__version__, "cpu_count": os.cpu_count()}
+    try:
+        import onnxruntime as ort
+        info["onnxruntime"] = ort.__version__
+    except ImportError:
+        pass
+    return info
 
 
 # -- main --------------------------------------------------------------------------
 def parse_args(argv=None) -> argparse.Namespace:
-    ap = argparse.ArgumentParser(description="Live YOLOv8n object detection on the AMD Phoenix NPU (XDNA1).")
+    ap = argparse.ArgumentParser(description="Live inference on the AMD Phoenix NPU (XDNA1) or ONNX Runtime.")
     ap.add_argument("--model", default=None,
                     help=r"an .ignite container (NPU) or .onnx model (ONNX Runtime); default "
                          r"..\ignite-xdna\build\yolov8n_full.ignite if present, else ..\ignite-xdna\build\yolov8n.ignite")
+    ap.add_argument("--task", choices=("auto",) + TASKS, default="auto",
+                    help="what the model computes (default auto: from the manifest or the ONNX outputs)")
     ap.add_argument("--source", default="0", help="webcam index (0, 1, ...) or a video or image file (default 0)")
     ap.add_argument("--headless", action="store_true", help="no window: run the loop and print progress lines")
     ap.add_argument("--frames", type=int, default=0,
@@ -332,9 +384,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--warmup", type=int, default=10, help="untimed frames before the timed ones (default 10)")
     ap.add_argument("--fresh", action="store_true",
                     help="wait for a new camera frame before each inference instead of reusing the newest one")
-    ap.add_argument("--conf", type=float, default=0.25, help="confidence threshold (default 0.25)")
-    ap.add_argument("--iou", type=float, default=0.45, help="NMS IoU threshold (default 0.45)")
+    ap.add_argument("--conf", type=float, default=0.25, help="detection confidence threshold (default 0.25)")
+    ap.add_argument("--iou", type=float, default=0.45, help="detection NMS IoU threshold (default 0.45)")
     ap.add_argument("--open-timeout", type=float, default=8.0, help="seconds allowed per camera backend open")
+    ap.add_argument("--json", default=None, help="write the run summary to this JSON file")
     return ap.parse_args(argv)
 
 
@@ -351,12 +404,13 @@ def main(argv=None) -> int:
     native = is_ignite_container(model)
     print(f"[Ignition] loading {model} ({'bare-metal .ignite container' if native else 'ONNX model'})", flush=True)
     try:
-        pipeline = YOLOPipeline(model, backend="xdna1" if native else "cpu", conf_thres=args.conf,
-                                iou_thres=args.iou, device_id=0)
+        task = infer_task(model) if args.task == "auto" else args.task
+        task, pipeline = create_pipeline(model, task=task, conf_thres=args.conf, iou_thres=args.iou, device_id=0)
     except Exception as exc:  # noqa: BLE001 - report and exit non-zero
         print(f"[Ignition] could not load {model}: {type(exc).__name__}: {exc}", flush=True)
         return 2
     backend = "NPU Device 0" if native else "ONNX Runtime CPU"
+    print(f"[Ignition] task: {task}", flush=True)
     if not native:
         print("[Ignition] ONNX Runtime CPU backend active", flush=True)
 
@@ -369,9 +423,11 @@ def main(argv=None) -> int:
     print(f"[Ignition] source: {source.label}", flush=True)
 
     capacity = args.frames if args.frames > 0 else 10_000
-    g2g, pre, npu, dispatch, readback, post, age = (Samples(capacity) for _ in range(7))
+    g2g, pre, net, dispatch, readback, post, age = (Samples(capacity) for _ in range(7))
     frame_limit = args.warmup + args.frames if args.frames > 0 else 0
-    processed = timed = unique = npu_boxes = detections = 0
+    processed = timed = unique = npu_frames = detections = 0
+    top1_counts: Dict[int, int] = {}
+    output_shape: Optional[List[int]] = None
     last_seq = 0
     cold_ms = float("nan")
     rss_first = rss_last = float("nan")
@@ -399,7 +455,7 @@ def main(argv=None) -> int:
                 unique += 1
                 last_seq = seq
 
-            result = pipeline.predict(frame, annotate=False)
+            result = pipeline.predict(frame, annotate=False) if task == TASK_DETECT else pipeline.predict(frame)
             t_done = time.perf_counter()
             t = result.timings_ms
             processed += 1
@@ -411,15 +467,20 @@ def main(argv=None) -> int:
                     rss_first = rss_mb()
                 g2g.add(t.get("g2g_ms", t["total_ms"]))
                 pre.add(t["preprocess_ms"])
-                npu.add(t["backbone_ms"])
+                net.add(t["backbone_ms"])
                 post.add(t["postprocess_ms"])
                 if "dispatch_ms" in t:
                     dispatch.add(t["dispatch_ms"])
                     readback.add(t["readback_ms"])
                 if args.fresh and source.kind == "camera":
                     age.add((t_done - arrival) * 1000.0)
-                detections += len(result.detections)
-                npu_boxes += result.head_source == "npu"
+                npu_frames += output_source(task, result) == "npu"
+                if task == TASK_DETECT:
+                    detections += len(result.detections)
+                elif task == TASK_CLASSIFY:
+                    top1_counts[result.topk[0].class_id] = top1_counts.get(result.topk[0].class_id, 0) + 1
+                else:
+                    output_shape = [int(v) for v in result.image.shape]
 
             if t_prev is not None:
                 rate = 1.0 / max(t_done - t_prev, 1e-6)
@@ -427,11 +488,10 @@ def main(argv=None) -> int:
             t_prev = t_done
 
             if window:
-                if display is None or display.shape != frame.shape:
-                    display = np.empty_like(frame)
-                np.copyto(display, frame)  # draw on a copy: the next loop may reuse this frame
-                render(display, result, fps, backend, source.label)
-                cv2.imshow(WINDOW_NAME, display)
+                canvas = render(frame, display, task, result, fps, backend, source.label)
+                if task != TASK_SUPER_RESOLUTION:
+                    display = canvas
+                cv2.imshow(WINDOW_NAME, canvas)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), ord("Q"), 27):
                     stop_reason = "q/ESC"
@@ -441,7 +501,7 @@ def main(argv=None) -> int:
                     break
             elif processed % 100 == 0:
                 print(f"[run] frame {processed} | G2G {t['total_ms']:.2f} ms | {fps:.0f} FPS | "
-                      f"{len(result.detections)} objects | boxes {result.head_source}", flush=True)
+                      f"{output_count(task, result)} | {task}: {output_source(task, result)}", flush=True)
         rss_last = rss_mb()
     finally:
         source.release()
@@ -453,22 +513,56 @@ def main(argv=None) -> int:
 
     print(f"[summary] stop: {stop_reason} | {processed} frames processed ({min(processed, args.warmup)} warm-up, "
           f"{timed} timed) | {unique} distinct source frames | {source.label}", flush=True)
+    record: Dict[str, Any] = {
+        "schema": 1, "created_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "model": str(model), "model_name": model.name, "model_bytes": model.stat().st_size, "task": task,
+        "backend": "npu" if native else "onnxruntime-cpu", "source": source.label, "source_kind": source.kind,
+        "frames_requested": args.frames, "warmup": args.warmup, "frames_processed": processed, "frames_timed": timed,
+        "stop_reason": stop_reason, "host": host_info(),
+    }
     if timed:
         v = g2g.values()
         p50, p95, p99 = np.percentile(v, [50, 95, 99])
         print(f"[summary] G2G mean {v.mean():.3f} ms | P50 {p50:.3f} | P95 {p95:.3f} | P99 {p99:.3f} | "
               f"max {v.max():.3f} | over the last {v.size} timed frames; cold first frame {cold_ms:.2f} ms",
               flush=True)
-        stages = f"preprocess {pre.mean():.3f} | {'NPU forward' if native else 'ONNX Runtime'} {npu.mean():.3f}"
+        stages = f"preprocess {pre.mean():.3f} | {'NPU forward' if native else 'ONNX Runtime'} {net.mean():.3f}"
         if dispatch.count:
             stages += f" (dispatch {dispatch.mean():.3f}, readback {readback.mean():.3f})"
-        print(f"[summary] stage means (ms): {stages} | decode+NMS {post.mean():.3f}", flush=True)
+        post_name = {TASK_DETECT: "decode+NMS", TASK_CLASSIFY: "softmax+top-k"}.get(task, "image output")
+        print(f"[summary] stage means (ms): {stages} | {post_name} {post.mean():.3f}", flush=True)
         if age.count:
-            print(f"[summary] camera arrival to detections mean {age.mean():.3f} ms", flush=True)
-        origin = f"boxes from NPU heads on {npu_boxes}/{timed} timed frames" if native else "boxes from ONNX Runtime"
-        print(f"[summary] {origin} | {detections / timed:.2f} detections per frame", flush=True)
+            print(f"[summary] camera arrival to output mean {age.mean():.3f} ms", flush=True)
+        if task == TASK_DETECT:
+            origin = f"boxes from NPU heads on {npu_frames}/{timed} timed frames" if native else "boxes from ONNX Runtime"
+            print(f"[summary] {origin} | {detections / timed:.2f} detections per frame", flush=True)
+        elif task == TASK_CLASSIFY:
+            top = max(top1_counts.items(), key=lambda kv: kv[1])
+            print(f"[summary] top-1 class {top[0]} on {top[1]}/{timed} timed frames", flush=True)
+        else:
+            print(f"[summary] output image {output_shape} from {'the NPU' if native else 'ONNX Runtime'}", flush=True)
         print(f"[summary] RSS {rss_first:.1f} MB at the first timed frame, {rss_last:.1f} MB at the end "
               f"({rss_last - rss_first:+.2f} MB over {timed} frames)", flush=True)
+        record.update({
+            "g2g_ms": {"mean": float(v.mean()), "p50": float(p50), "p95": float(p95), "p99": float(p99),
+                       "min": float(v.min()), "max": float(v.max()), "cold_first_frame": float(cold_ms)},
+            "fps_from_mean": 1000.0 / float(v.mean()),
+            "stages_ms": {"preprocess": pre.mean(), "network": net.mean(), "postprocess": post.mean(),
+                          **({"dispatch": dispatch.mean(), "readback": readback.mean()} if dispatch.count else {})},
+            "rss_mb": {"first_timed": rss_first, "end": rss_last, "drift": rss_last - rss_first},
+            "npu_frames": npu_frames,
+        })
+        if task == TASK_DETECT:
+            record["detections_per_frame"] = detections / timed
+        elif task == TASK_CLASSIFY:
+            record["top1_class_counts"] = {str(k): n for k, n in sorted(top1_counts.items())}
+        else:
+            record["output_shape"] = output_shape
+    if args.json:
+        out = Path(args.json)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        print(f"[summary] wrote {out}", flush=True)
     return 0
 
 
