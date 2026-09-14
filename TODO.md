@@ -40,19 +40,20 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   YOLOv8n container compiled before the model zoo still runs on it within 0.07 ms of the rebuilt one, YOLOv8s
   decodes natively (0.041 ms against 0.316 ms), and Ignition's `model-zoo` branch ran YOLOv8n, YOLOv8s and
   SESR M7 at 7.68, 17.15 and 6.64 ms mean glass-to-glass (ignite-xdna `results/aie/model_zoo_main_phoenix_20260914T2209Z.log`).
+- [x] **Model zoo in `live_ignition.py`:** `--task` serves detection, classification and super-resolution models,
+  reading the task from the container manifest or the ONNX outputs by default, and `--json` writes each run's
+  summary. With ignite-xdna `68c2fea` on `bus.jpg`, YOLOv8s ran at 17.22 ms and SESR M7 at 6.59 ms mean
+  glass-to-glass on the NPU, and ResNet50 classified on the CPU at 30.49 ms ([README](README.md#other-models)).
 
 ## Active
 
 ### 1. Model zoo in Ignition
 
-ignite-xdna's `main` compiles YOLOv8s and SESR M7 to `.ignite` and runs them on Device 0 (merge `6bd2718`). The
-Ignition side is still a branch that no longer fast-forwards onto `main`:
+ignite-xdna's `main` compiles YOLOv8s and SESR M7 to `.ignite` and runs them on Device 0 (merge `6bd2718`), and
+Ignition's `live_ignition.py` serves them (`--task`, `--json`); neither project has released it.
 
-- **Ignition `model-zoo`** (`3cf2c49`, forked from `e3a6fcf`) makes `live_ignition.py` task-aware (`--task`,
-  `--json`), with classification and super-resolution pipelines.
-
-ignite-xdna's `tools/model_zoo_bench.py` drives Ignition for the suites. Measured 2026-09-14 on the branch
-before the merge, logs in ignite-xdna `results/model_zoo/`, G2G means:
+ignite-xdna's `tools/model_zoo_bench.py` drives Ignition for the suites. Measured 2026-09-14 on Ignition's
+`model-zoo` branch before the merge, logs in ignite-xdna `results/model_zoo/`, G2G means:
 
 | Model | ONNX Runtime CPU, 300 frames | NPU through Ignition |
 |---|---:|---:|
@@ -66,7 +67,6 @@ On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.6
 
 - [ ] Raise the `npu` extra's minimum to the first ignite-xdna release that ships `pipelines/sr_pipeline.py`,
   which Ignition's super-resolution path imports; no ignite-xdna release has it yet.
-- [ ] Replay Ignition `model-zoo` onto `main`, land it, and document `--task` and `--json` in the README.
 - [ ] Move the suite runner into Ignition as one command that writes a JSON record per model.
 - [ ] yolo11n_no_c2psa finds nothing on `bus.jpg` (C2PSA removed), so check it detects before lowering it.
   ResNet50 has no `.ignite` lowering yet.

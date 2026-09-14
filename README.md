@@ -40,7 +40,7 @@ The same model (`yolov8n_cut_xint8.onnx`, AMD Quark XINT8) ran on the same image
 | **Runtime install on disk** | **≈318 MB** | ≈4,704 MB |
 | Detections on `bus.jpg` | 4 people, 1 bus | the same 5 objects (box IoU 0.93–0.99) |
 | Where the network runs | all 66 layers on the NPU | 922 of 929 graph nodes on the NPU; 7 quantize/dequantize nodes on the CPU |
-| Models it accelerates | YOLOv8n today; other `.onnx` models run on the CPU | any ONNX model its compiler accepts |
+| Models it accelerates | YOLOv8n in a release; YOLOv8s and SESR M7 with ignite-xdna from source; other `.onnx` models run on the CPU | any ONNX model its compiler accepts |
 | Before the first run | a compiled `.ignite` container (a one-time build with ignite-xdna) | none: the model compiles on its first session and is cached |
 
 **What the comparison does and does not show:**
@@ -61,8 +61,8 @@ The same model (`yolov8n_cut_xint8.onnx`, AMD Quark XINT8) ran on the same image
 | **NPU driver and XRT** | ✅ Verified | NPU driver 32.0.20101.3760, firmware 1.5.5.391, XRT 2.21.0 |
 | **Python** | ✅ 3.10–3.13 (CPU), 3.13 (NPU) | The CPU path installs and runs on 3.10, 3.11, 3.12 and 3.13. The NPU path needs the Python the XRT SDK's `pyxrt` was built for, 3.13 with XRT 2.21.0; on 3.12 it stops at `DLL load failed while importing pyxrt` |
 | **YOLOv8n detection on the NPU** | ✅ Verified | 640×640 input, AMD Quark XINT8, compiled to `build/yolov8n_full.ignite` by ignite-xdna |
-| **Other models on the NPU** | ⚠️ In development | YOLOv8s and SESR M7 (super-resolution) compile and run on the NPU with ignite-xdna's `main`; not in a release of either project, and Ignition's task-aware `live_ignition.py` for them is still on a branch |
-| **Other ONNX models** | ✅ CPU only | ONNX Runtime's CPU execution provider |
+| **Other models on the NPU** | ⚠️ From source only | YOLOv8s detection and SESR M7 super-resolution run on the NPU through `live_ignition.py` with ignite-xdna built from its `main`; neither is in a release of either project ([how](#5-run-other-models)) |
+| **Other ONNX models** | ✅ CPU only | ONNX Runtime's CPU execution provider; `live_ignition.py` detects, classifies or upscales according to the model's outputs |
 | **Webcams** | ✅ Verified | USB webcams through DirectShow, then Media Foundation; tested at 640×480 |
 | **Video files and images** | ✅ Verified | Anything OpenCV opens, letterboxed to 640×640; tested with 640×480 and 810×1080 frames |
 | **Interfaces** | ✅ Verified | Webcam app `live_ignition.py`, Python API, `ignition` command line |
@@ -90,7 +90,7 @@ For `.onnx` models on the CPU only:
 pip install ./ignition_ai-0.3.1-py3-none-any.whl
 ```
 
-The wheels carry the Python API and the `ignition` command. The webcam app `live_ignition.py` lives in the repository, not the wheel, and the container is still built in an ignite-xdna checkout. v0.3.1 predates the backend, camera and native-decode changes listed in [TODO.md](TODO.md)'s completed work.
+The wheels carry the Python API and the `ignition` command. The webcam app `live_ignition.py` lives in the repository, not the wheel, and the container is still built in an ignite-xdna checkout. v0.3.1 predates the backend, camera, native-decode and model-zoo changes listed in [TODO.md](TODO.md)'s completed work.
 
 **From source**, which the steps below use:
 
@@ -134,20 +134,23 @@ python live_ignition.py --headless --frames 300 --fresh   # wait for each new ca
 python live_ignition.py --headless --frames 300 --fresh --exposure-priority off   # hold 30 fps in dim light: darker image, fewer detections
 python live_ignition.py --model ../ignite-xdna/build/yolov8n_full.ignite --source examples/assets/bus.jpg --headless --frames 300
 python live_ignition.py --model ../ignite-xdna/models/yolov8n_cut_xint8.onnx --source examples/assets/bus.jpg --headless --frames 300   # CPU path
+python live_ignition.py --headless --frames 300 --json run.json   # also write the summary as JSON
 ```
 
 | Flag | Meaning |
 |---|---|
 | `--model` | An `.ignite` container (NPU) or `.onnx` model (CPU). Defaults to `../ignite-xdna/build/yolov8n_full.ignite`. |
+| `--task` | What the model computes. `auto` (the default) reads it from the container's manifest or the ONNX model's outputs; `detect`, `classify` or `super_resolution` sets it. |
 | `--source` | Webcam index (`0`, `1`, …), video file or image (default `0`). |
 | `--headless` | No window; prints a progress line every 100 frames. |
 | `--frames N` | Stop after N timed frames and print the summary (default 0: run until stopped). |
 | `--warmup N` | Untimed frames before the timed ones (default 10). |
 | `--fresh` | Wait for a new camera frame before each inference instead of reusing the newest one. |
-| `--conf`, `--iou` | Confidence and NMS IoU thresholds (defaults 0.25 and 0.45). |
+| `--conf`, `--iou` | Detection confidence and NMS IoU thresholds (defaults 0.25 and 0.45). |
 | `--open-timeout` | Seconds allowed for each camera backend to open (default 8). |
 | `--camera-backend` | `auto` (DirectShow, then Media Foundation, then OpenCV's default; the default), `dshow`, `msmf` or `any`. |
 | `--exposure-priority` | `keep` (default) leaves the webcam's setting. `off` holds the frame rate in dim light at the cost of a darker image; `on` lets auto exposure lower it. DirectShow only. The camera keeps this setting across programs, so the previous value is put back on exit; a killed process leaves it changed. |
+| `--json PATH` | Also write the run's summary to PATH as one JSON object: glass-to-glass percentiles, stage means, resident memory, how many frames the NPU produced, the task's result (detections per frame, top-1 class counts or output shape), the camera's measured rate and the host's library versions. |
 
 ### 3. Use it from Python
 
@@ -172,9 +175,32 @@ ignition detect ../ignite-xdna/build/yolov8n_full.ignite --input examples/assets
 
 On the test machine, the 100-frame benchmark sustained 128.78 frames per second with a median of 7.70 ms.
 
+### 5. Run other models
+
+`live_ignition.py` works out what a model computes from the container's manifest or the ONNX model's outputs, and `--task` overrides it:
+
+- **Detection:** YOLO models (YOLOv8n, YOLOv8s), drawn as boxes.
+- **Classification:** one `(1, N)` output, such as ResNet50, shown as the top 5. Preprocessing follows a timm `preprocess_config.json` beside the model, or ImageNet defaults. It runs on the CPU only.
+- **Super-resolution:** one image output a whole multiple of the input size, such as SESR M7 (256×256 to 512×512), shown as the upscaled image.
+
+YOLOv8s and SESR M7 run on the NPU with ignite-xdna built from its `main`. No ignite-xdna release has its super-resolution pipeline yet; without it a SESR container stops at load with an `ImportError` that says so. Build the containers in the ignite-xdna checkout with the toolchain YOLOv8n needs (ignite-xdna's [model zoo notes](https://github.com/jdominick05/ignite-xdna/blob/main/docs/MODEL_ZOO_BENCHMARKS.md) record how these were built and checked):
+
+```bash
+ignite-compile --engine graph --input models/yolov8s_cut_xint8.onnx --output build/yolov8s.ignite
+ignite-compile --engine graph --input models/sesr_m7_xint8.onnx --output build/sesr_m7.ignite
+```
+
+Then, from Ignition:
+
+```bash
+python live_ignition.py --model ../ignite-xdna/build/yolov8s.ignite --source examples/assets/bus.jpg   # window with boxes
+python live_ignition.py --model ../ignite-xdna/build/sesr_m7.ignite --source examples/assets/bus.jpg --headless --frames 300 --json sesr_m7.json
+python live_ignition.py --model ../ignite-xdna/models/resnet50_xint8_c64.onnx --source examples/assets/bus.jpg   # top 5, CPU
+```
+
 ## Performance
 
-All figures come from YOLOv8n on NPU Device 0 of a Ryzen 7 8700G:
+The table's figures come from YOLOv8n on NPU Device 0 of a Ryzen 7 8700G; [other models](#other-models) follow it:
 - **Setup:** Windows 11, `build/yolov8n_full.ignite`, webcam 0 through DirectShow at 640×480, 10 warm-up frames per run unless the command sets `--warmup`. Rows with a commit ran ignite-xdna `v0.1.0-phoenix-npu`, which decodes boxes in numpy and runs NMS through OpenCV; *re-check* rows ran ignite-xdna `5688f6d`, which does both in one native C pass.
 - **Records:** each row names the commit whose message records the run. *Re-check* rows were measured on 2026-09-14 and are recorded in the commit that added them to this README.
 
@@ -197,6 +223,20 @@ All figures come from YOLOv8n on NPU Device 0 of a Ryzen 7 8700G:
 - **Decode and NMS:** in native code they took 0.030 ms with 4.62 objects per frame on the webcam and 0.031–0.033 ms with 5 on `bus.jpg`. The numpy and OpenCV version behind the rows with a commit took 0.25–0.33 ms with 5–6 objects in view and 0.05 ms on an empty scene.
 - **Long runs:** resident memory did not grow: −1.12 MB over 500 webcam frames in a lit room, −1.15 MB over 500 in a dark one, +0.02 MB over 500 frames of a still image.
 - **Clean exit:** every run exited cleanly and released the NPU; afterwards `xrt-smi` reported no hardware contexts running.
+
+### Other models
+
+Measured on 2026-09-14 through `live_ignition.py` with ignite-xdna `68c2fea` and containers built from it, on `examples/assets/bus.jpg` with 10 warm-up and 300 timed frames, one run each; recorded in the commit that added this section.
+
+| Model | Task | Runs on | Mean | 99th pct | Output |
+|---|---|---|---:|---:|---|
+| YOLOv8s | detect | NPU | 17.22 ms | 17.62 ms | 6 objects |
+| SESR M7 | super_resolution | NPU | 6.59 ms | 7.36 ms | 512×512 image |
+| SESR M7 | super_resolution | CPU (ONNX Runtime) | 13.99 ms | 18.68 ms | 512×512 image |
+| ResNet50 | classify | CPU (ONNX Runtime) | 30.49 ms | 40.09 ms | top-1 ImageNet class 654 (minibus), p = 0.58 |
+
+- **Where the time goes:** YOLOv8s spent 16.66 ms in NPU dispatch and 0.040 ms in native decode and NMS. SESR M7 spent 4.33 ms in NPU dispatch and 1.91 ms in host post-processing of its output.
+- **On the webcam:** SESR M7 took 6.51 ms per frame on webcam 0 at 640×480.
 
 ## How a frame runs
 
@@ -224,11 +264,12 @@ Latency is measured glass to glass: from the moment the loop takes a frame to th
 These stage times come from the webcam re-check above: 640×480 frames with 4.62 objects per frame. A larger source costs more at ingress; the 810×1080 `bus.jpg` in the AMD comparison took 0.31 ms.
 - **What the NPU time is spent on:** activations move between host memory and the NPU between layers, so most of the dispatch is data movement. A copy of the container with every weight operation switched off still took 5.37 ms of a 7.39 ms dispatch (ignite-xdna `results/model_zoo/dispatch_floor_yolov8n_full.json`).
 - **The CPU fallback:** an `.onnx` model runs the same steps on ONNX Runtime's CPU execution provider instead.
+- **Other tasks:** the diagram shows detection. `SuperResolutionPipeline` runs an `.ignite` container through ignite-xdna's super-resolution pipeline on the NPU, or an `.onnx` model on ONNX Runtime; `ClassificationPipeline` runs on ONNX Runtime only.
 - **The camera:** a capture thread (`ThreadedCamera`) owns the webcam so sensor I/O never stalls inference. It tries DirectShow, then Media Foundation, abandons a backend that does not open within `--open-timeout`, and skips empty frames. It counts the frames it reads and the ones that repeat the previous frame. q, ESC, closing the window, Ctrl+C and Ctrl+Break all release the camera and the NPU.
 
 ## Limitations
 
-- **One NPU model today.** YOLOv8n is the only model with a released `.ignite` container. Other ONNX models run, but on the CPU.
+- **One NPU model in a release.** YOLOv8n is the only model the released packages run on the NPU. YOLOv8s and SESR M7 need ignite-xdna built from its `main`, ResNet50 classification has no `.ignite` lowering, and other ONNX models run on the CPU.
 - **A build step.** The `.ignite` container is built from AMD Quark's quantized model with ignite-xdna and the mlir-aie toolchain; it is not a pip install.
 - **Narrow hardware support.** Only Phoenix has been verified. Hawk Point is untested, and Strix-class NPUs and Linux are not supported.
 - **Dim light halves the webcam's frame rate.** The test webcam's auto exposure drops to 15 fps in a dim room; `--exposure-priority off` holds 30 fps with a darker image and fewer detections.
@@ -238,10 +279,11 @@ Open work is tracked in [TODO.md](TODO.md).
 
 ```
 Ignition/
-├── live_ignition.py           # webcam / video / image app with latency percentiles
+├── live_ignition.py           # webcam / video / image app: detect, classify or upscale; percentiles, --json
 ├── src/ignition/
 │   ├── __init__.py            # compile(), devices()
 │   ├── pipelines/yolo.py      # YOLOPipeline: .ignite on the NPU via ignite-xdna, .onnx on ONNX Runtime
+│   ├── pipelines/vision.py    # task inference, ClassificationPipeline, SuperResolutionPipeline
 │   ├── pipelines/streaming.py # 3-stage asynchronous runner for .onnx models
 │   ├── backends/              # xdna1 layer backend, ONNX Runtime CPU backend
 │   ├── model.py, devices.py   # Model API, NPU discovery
