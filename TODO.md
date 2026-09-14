@@ -55,7 +55,9 @@ scene (`8ffa482`). That difference is the latency cost of a busy scene. The code
 `cv2.dnn.NMSBoxesBatched` over Python lists built with `.tolist()`. Ignition's wrapper adds about 8 µs.
 
 - [ ] Move DFL anchor expansion, for the anchors that survive the class-max prune, and greedy per-class
-  NMS into AVX2 C in ignite-xdna. Build and load it like `pipelines/preprocess_simd.c` (ctypes, `-mavx2`).
+  NMS into native C in ignite-xdna, with AVX2 intrinsics where they measurably help. Build and load it
+  like `pipelines/preprocess_simd.c`, which is compiled on first use (MSVC `/openmp`, or clang/gcc with
+  `-mavx2`) and loaded through ctypes. That file has no AVX2 intrinsics today.
 - [ ] Before switching, require boxes identical to the numpy path on `bus.jpg` and on recorded camera
   frames.
 - **Target:** post-processing at or under 0.05 ms with objects in view, about 0.25 ms back per frame (derived: 0.30 − 0.05).

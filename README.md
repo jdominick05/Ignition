@@ -23,7 +23,7 @@ Give Ignition a bare-metal `.ignite` container compiled by [ignite-xdna](https:/
 ```mermaid
 flowchart LR
     SRC["webcam, video or image<br/>ThreadedCamera"] --> P["YOLOPipeline"]
-    P -- ".ignite" --> ING["AVX2 ingress into the<br/>mapped input buffer"]
+    P -- ".ignite" --> ING["native C ingress into the<br/>mapped input buffer"]
     ING --> NPU["NPU Device 0<br/>66 layers on 16 AIE2 cores"]
     NPU --> RB["P3/P4/P5 head readback"]
     P -- ".onnx" --> ORT["letterbox and<br/>ONNX Runtime on the CPU"]
@@ -40,7 +40,7 @@ Glass-to-glass (G2G) is timed from the moment the loop takes a frame to the mome
 
 | Stage | Where it runs | Mean per frame |
 |---|---|---:|
-| **Ingress:** one fused AVX2 C pass letterboxes, resizes and quantizes the BGR frame straight into the input plane of the mapped XRT buffer object; no int8 tensor is built on the host | ignite-xdna `pipelines/preprocess.py` | 0.15 ms |
+| **Ingress:** one fused native C pass (OpenMP) letterboxes, resizes and quantizes the BGR frame straight into the input plane of the mapped XRT buffer object; no int8 tensor is built on the host | ignite-xdna `pipelines/preprocess.py` and `preprocess_simd.c` | 0.15 ms |
 | **NPU dispatch:** one run of the graph-engine program on the 16 cores; its instruction stream moves weight packets and activation tiles between host memory and the cores for all 66 layers | NPU Device 0 | 7.21 ms |
 | **Head readback:** the P3, P4 and P5 box and class tensors, read from the output buffer | ignite-xdna `runtime/graph_session.py` | 0.24 ms |
 | **Decode and NMS:** DFL box decode and per-class NMS on the host | ignite-xdna `YoloDecoder.postprocess` | 0.28 ms (0.05 ms on an empty scene) |
