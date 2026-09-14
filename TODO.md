@@ -30,22 +30,15 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   environments.
 - [x] **Python coverage:** the CPU install from source passes on Python 3.10, 3.11, 3.12 and 3.13. The NPU path
   needs the Python `pyxrt` links (3.13 with XRT 2.21.0), and the README says so.
+- [x] **Post-processing in native code** (ignite-xdna `e2867b6`): DFL decode and per-class NMS for the NPU
+  heads run in native C (`pipelines/decode_native.c`), with detections identical to the numpy and OpenCV path
+  over 6,000 synthetic trials, 312 recorded and 340 live frames. Live decode and NMS medians fell from
+  0.28–0.29 ms to 0.044–0.045 ms with about 5 objects in view. The README's AMD comparison and re-check rows were
+  re-run on it.
 
 ## Active
 
-### 1. Post-processing in native code
-
-DFL decode and NMS take 0.27–0.33 ms per frame with 5–6 objects in view and 0.05 ms on an empty scene
-(`8ffa482`). The code is ignite-xdna's `YoloDecoder.postprocess` (`pipelines/yolo_pipeline.py`): numpy DFL
-decode, then `cv2.dnn.NMSBoxesBatched` over lists built with `.tolist()`.
-
-- [ ] Move DFL anchor expansion (for anchors that survive the class-max prune) and greedy per-class NMS into
-  native C in ignite-xdna, built and loaded like `pipelines/preprocess_simd.c` (OpenMP C compiled on first use,
-  loaded through ctypes, no AVX2 intrinsics today). Use AVX2 only where it measurably helps.
-- [ ] Before switching, require boxes identical to the numpy path on `bus.jpg` and on recorded camera frames.
-- **Target:** at or under 0.05 ms with objects in view, about 0.25 ms back per frame (0.30 − 0.05).
-
-### 2. Model zoo in Ignition
+### 1. Model zoo in Ignition
 
 Two unlanded branches hold this work, and neither fast-forwards onto its `main` any more:
 
@@ -71,9 +64,9 @@ ignite-xdna `results/model_zoo/` on that branch, G2G means:
 - [ ] Move the suite runner into Ignition as one command that writes a JSON record per model.
 - [ ] yolo11n_no_c2psa finds nothing on `bus.jpg` (C2PSA removed), so check it detects before lowering it.
   ResNet50 has no `.ignite` lowering yet.
-- [ ] SESR M7 dispatch is 4.25 ms against a 1.5 ms target, with a 2.53 ms non-compute floor (§5).
+- [ ] SESR M7 dispatch is 4.25 ms against a 1.5 ms target, with a 2.53 ms non-compute floor (§4).
 
-### 3. Release and distribution
+### 2. Release and distribution
 
 - [ ] ignite-xdna is on no package index, so the `npu` extra resolves only with its wheel beside Ignition's.
   Decide whether to publish both to PyPI.
@@ -81,16 +74,17 @@ ignite-xdna `results/model_zoo/` on that branch, G2G means:
   prebuilt `yolov8n_full.ignite` can be attached to a release, after checking the model's licence.
 - [ ] The published v0.2.0 notes still quote the figures v0.3.1 corrects. Decide whether to edit them.
 
-### 4. Hardware coverage
+### 3. Hardware coverage
 
 Only Phoenix on Windows 11 is verified ([README](README.md#compatibility)).
 
 - [ ] Run the `.ignite` path on a Hawk Point NPU (same XDNA1 generation) and record it before calling it
   supported.
 
-### 5. NPU dispatch time (ignite-xdna)
+### 4. NPU dispatch time (ignite-xdna)
 
-AMD's NPU stage is about 0.8 ms faster than Ignition's on the same model and image (`d42d33e`). Most of
+AMD's NPU stage is about 0.7 ms faster than Ignition's on the same model and image in the
+[README](README.md#ignition-vs-amds-ryzen-ai-stack)'s same-sitting comparison (0.8 ms in `d42d33e`). Most of
 Ignition's dispatch is activations moving between host memory and the NPU: 5.37 ms of a 7.39 ms dispatch with
 every weight operation switched off (ignite-xdna `results/model_zoo/dispatch_floor_yolov8n_full.json`).
 
