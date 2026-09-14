@@ -113,7 +113,7 @@ More ways to run it:
 
 ```bash
 python live_ignition.py --headless --frames 300 --fresh   # wait for each new camera frame (camera-paced)
-python live_ignition.py --headless --frames 300 --fresh --exposure-priority off   # hold the camera's frame rate in dim light
+python live_ignition.py --headless --frames 300 --fresh --exposure-priority off   # hold 30 fps in dim light: darker image, fewer detections
 python live_ignition.py --model ../ignite-xdna/build/yolov8n_full.ignite --source examples/assets/bus.jpg --headless --frames 300
 python live_ignition.py --model ../ignite-xdna/models/yolov8n_cut_xint8.onnx --source examples/assets/bus.jpg --headless --frames 300   # CPU path
 ```
