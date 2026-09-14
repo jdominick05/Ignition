@@ -39,7 +39,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT / "src") not in sys.path:
@@ -58,6 +58,34 @@ except ImportError:  # the ironenv venv has no psutil; rss_mb falls back to the 
 WINDOW_NAME = "Ignition YOLOv8n - AMD Phoenix NPU"
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 Frame = Tuple[Optional[np.ndarray], int, float]
+CAMERA_BACKENDS = ("DSHOW", "MSMF", "ANY")
+
+
+def _frame_sample(frame: np.ndarray) -> bytes:
+    """Every 16th pixel of every 16th row: sensor noise makes a new frame differ from the last one here."""
+    return frame[::16, ::16].tobytes()
+
+
+def _fourcc_text(value: float) -> str:
+    code = int(value)
+    text = "".join(chr((code >> (8 * i)) & 0xFF) for i in range(4))
+    return text if code > 0 and text.isprintable() and text.strip() else str(code)
+
+
+def _set_exposure_priority(index: int, value: int, log: Callable[[str], None]) -> Optional[int]:
+    """Sets DirectShow camera ``index``'s exposure auto priority; returns the value to put back, or None."""
+    try:
+        from ignition._camera_controls import ExposurePriority
+        with ExposurePriority(index) as control:
+            previous = control.get()
+            control.set(value)
+            effect = "frame rate held in dim light" if value == 0 else "auto exposure may lower the frame rate"
+            log(f"[camera] {control.name}: exposure auto priority {previous} -> {control.get()} for this run "
+                f"({effect}); the camera keeps this setting until it is put back on exit")
+        return previous
+    except Exception as exc:  # noqa: BLE001 - the control is optional: run at the camera's own setting
+        log(f"[camera] exposure auto priority left unchanged: {type(exc).__name__}: {exc}")
+        return None
 
 
 # -- sources -----------------------------------------------------------------------
@@ -70,33 +98,57 @@ class ThreadedCamera:
     Foundation, then OpenCV's default. Each open runs in a helper thread and is
     abandoned after ``open_timeout_s``, because DirectShow can block forever on an
     IR sensor.
+
+    It counts the frames it reads and the ones that repeat the previous frame
+    (compared on a 1-in-16 pixel sample), because a backend's reported FPS is not
+    what arrives: on the test webcam DirectShow reports FPS -1, and Media
+    Foundation reads at 30 fps partly by returning repeated frames.
+
+    With ``exposure_priority`` (0 or 1) it sets the camera's exposure auto priority
+    through DirectShow before opening, and puts the previous value back in
+    ``release()`` (or at once if the open fails or another backend opens the camera).
     """
 
     kind = "camera"
 
-    def __init__(self, index: int, open_timeout_s: float = 8.0, log: Callable[[str], None] = print):
+    def __init__(self, index: int, open_timeout_s: float = 8.0, log: Callable[[str], None] = print,
+                 backends: Optional[Sequence[str]] = None, exposure_priority: Optional[int] = None):
         self.index = index
         self.finished = False
         self.read_failures = 0
-        self.backend, self._cap, first = self._open(index, open_timeout_s, log)
+        self._log = log
+        self._priority_to_restore: Optional[int] = None
+        if exposure_priority is not None:
+            self._priority_to_restore = _set_exposure_priority(index, exposure_priority, log)
+        try:
+            self.backend, self._cap, first = self._open(index, open_timeout_s, log, backends)
+        except Exception:
+            self._restore_exposure_priority()
+            raise
+        if self._priority_to_restore is not None and self.backend != "DSHOW":
+            log(f"[camera] exposure auto priority is set by DirectShow device index, but {self.backend} opened "
+                "the camera: putting it back")
+            self._restore_exposure_priority()
         self.label = f"camera {index} via {self.backend} {first.shape[1]}x{first.shape[0]}"
         self._cond = threading.Condition()
         self._frame: Optional[np.ndarray] = first
         self._seq = 1
-        self._stamp = time.perf_counter()
+        self._stamp = self._first_stamp = time.perf_counter()
+        self._sample = _frame_sample(first)
+        self.frames, self.repeats = 1, 0
         self._running = True
         self._thread = threading.Thread(target=self._loop, name="ignition-camera", daemon=True)
         self._thread.start()
 
     @staticmethod
-    def _backends() -> List[Tuple[str, int]]:
-        return [(name, int(getattr(cv2, f"CAP_{name}"))) for name in ("DSHOW", "MSMF", "ANY")
+    def _backends(names: Optional[Sequence[str]] = None) -> List[Tuple[str, int]]:
+        return [(name, int(getattr(cv2, f"CAP_{name}"))) for name in (names or CAMERA_BACKENDS)
                 if hasattr(cv2, f"CAP_{name}")]
 
     @staticmethod
-    def _open(index: int, timeout_s: float, log: Callable[[str], None]):
+    def _open(index: int, timeout_s: float, log: Callable[[str], None], names: Optional[Sequence[str]] = None):
         attempts = []
-        for name, api in ThreadedCamera._backends():
+        for name, api in ThreadedCamera._backends(names):
             box = {}
 
             def worker(box=box, api=api):
@@ -119,8 +171,12 @@ class ThreadedCamera:
                 outcome = f"no answer after {timeout_s:.0f} s, abandoned"
             elif "frame" in box:
                 frame = box["frame"]
-                log(f"[camera] index {index} via {name}: opened, {frame.shape[1]}x{frame.shape[0]} ({dt:.2f} s)")
-                return name, box["cap"], frame
+                cap = box["cap"]
+                log(f"[camera] index {index} via {name}: opened, {frame.shape[1]}x{frame.shape[0]} ({dt:.2f} s); "
+                    f"backend reports FOURCC {_fourcc_text(cap.get(cv2.CAP_PROP_FOURCC))}, "
+                    f"FPS {cap.get(cv2.CAP_PROP_FPS):g}, AUTO_EXPOSURE {cap.get(cv2.CAP_PROP_AUTO_EXPOSURE):g} "
+                    "(unverified: the [summary] camera line has the measured rate)")
+                return name, cap, frame
             else:
                 outcome = f"error: {box['error']}" if "error" in box else "no frame"
                 if box.get("cap") is not None:
@@ -140,9 +196,13 @@ class ThreadedCamera:
                 time.sleep(0.005)
                 continue
             stamp = time.perf_counter()
+            sample = _frame_sample(frame)
             with self._cond:
                 self._frame, self._stamp = frame, stamp
                 self._seq += 1
+                self.frames += 1
+                self.repeats += sample == self._sample
+                self._sample = sample
                 self._cond.notify_all()
 
     def read(self, after_seq: int = 0, timeout_s: float = 1.0) -> Frame:
@@ -160,12 +220,32 @@ class ThreadedCamera:
                 return None, after_seq, 0.0
             return self._frame, self._seq, self._stamp
 
+    def rates(self) -> Tuple[int, int, float]:
+        """``(frames, repeats, span_s)``: frames read since the open, how many repeated the previous frame, and
+        the seconds from the first frame to the latest."""
+        with self._cond:
+            return self.frames, self.repeats, self._stamp - self._first_stamp
+
+    def _restore_exposure_priority(self) -> None:
+        previous, self._priority_to_restore = self._priority_to_restore, None
+        if previous is None:
+            return
+        try:
+            from ignition._camera_controls import ExposurePriority
+            with ExposurePriority(self.index) as control:
+                control.set(previous)
+                self._log(f"[camera] exposure auto priority put back to {control.get()}")
+        except Exception as exc:  # noqa: BLE001 - report it; shutdown must continue
+            self._log(f"[camera] could not put exposure auto priority back to {previous}: "
+                      f"{type(exc).__name__}: {exc}")
+
     def release(self) -> None:
         self._running = False
         with self._cond:
             self._cond.notify_all()
         self._thread.join(timeout=2.0)
         self._cap.release()
+        self._restore_exposure_priority()
 
 
 class FileSource:
@@ -204,10 +284,12 @@ class FileSource:
             self._cap.release()
 
 
-def open_source(spec: str, open_timeout_s: float):
+def open_source(spec: str, open_timeout_s: float, camera_backend: str = "auto", exposure_priority: str = "keep"):
     text = spec.strip()
     if text.isdigit():
-        return ThreadedCamera(int(text), open_timeout_s)
+        names = None if camera_backend == "auto" else [camera_backend.upper()]
+        priority = {"keep": None, "off": 0, "on": 1}[exposure_priority]
+        return ThreadedCamera(int(text), open_timeout_s, backends=names, exposure_priority=priority)
     path = Path(text)
     if not path.is_file():
         raise FileNotFoundError(f"{path} is neither a webcam index nor an existing file")
@@ -335,6 +417,13 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--conf", type=float, default=0.25, help="confidence threshold (default 0.25)")
     ap.add_argument("--iou", type=float, default=0.45, help="NMS IoU threshold (default 0.45)")
     ap.add_argument("--open-timeout", type=float, default=8.0, help="seconds allowed per camera backend open")
+    ap.add_argument("--camera-backend", choices=["auto", "dshow", "msmf", "any"], default="auto",
+                    help="OpenCV capture backend for a webcam; auto tries DirectShow, then Media Foundation, "
+                         "then OpenCV's default (default auto)")
+    ap.add_argument("--exposure-priority", choices=["keep", "off", "on"], default="keep",
+                    help="the webcam's exposure auto priority for this run, put back on exit (DirectShow): off "
+                         "holds the frame rate in dim light with a darker image, on lets auto exposure lower it "
+                         "(default keep: leave the camera's setting)")
     return ap.parse_args(argv)
 
 
@@ -361,7 +450,7 @@ def main(argv=None) -> int:
         print("[Ignition] ONNX Runtime CPU backend active", flush=True)
 
     try:
-        source = open_source(args.source, args.open_timeout)
+        source = open_source(args.source, args.open_timeout, args.camera_backend, args.exposure_priority)
     except Exception as exc:  # noqa: BLE001 - report and exit non-zero
         pipeline.close()
         print(f"[Ignition] could not open source {args.source!r}: {exc}", flush=True)
@@ -453,6 +542,12 @@ def main(argv=None) -> int:
 
     print(f"[summary] stop: {stop_reason} | {processed} frames processed ({min(processed, args.warmup)} warm-up, "
           f"{timed} timed) | {unique} distinct source frames | {source.label}", flush=True)
+    if source.kind == "camera":
+        frames, repeats, span = source.rates()
+        if frames > 1 and span > 0:
+            print(f"[summary] camera: {frames} frames in {span:.1f} s = {(frames - 1) / span:.2f} fps read, "
+                  f"{repeats} repeated the previous frame, {(frames - 1 - repeats) / span:.2f} distinct fps",
+                  flush=True)
     if timed:
         v = g2g.values()
         p50, p95, p99 = np.percentile(v, [50, 95, 99])
