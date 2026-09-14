@@ -13,7 +13,7 @@ from .devices import probe_devices, get_default_device, DeviceInfo
 from .pipelines.yolo import YOLOPipeline, Detection, YOLOResult, is_ignite_container
 from .pipelines.streaming import AsyncYOLOPipeline
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 def compile(
