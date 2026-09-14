@@ -18,6 +18,8 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   matrix.
 - [x] **pip install** (`60a7be1`, ignite-xdna `389f0a7`): Ignition's wheel and sdist install on their own; the
   `npu` extra with ignite-xdna's wheel adds the NPU path.
+- [x] **v0.3.1 release** (tag at `ea5f86e`): both wheels, the sdist and SHA-256 sums on GitHub and GitLab, with
+  [notes](docs/releases/v0.3.1.md); every file was downloaded back from both hosts and matched the sums.
 
 ## Active
 
@@ -86,10 +88,6 @@ ignite-xdna `results/model_zoo/` on that branch, G2G means:
 
 ### 5. Release and distribution
 
-v0.3.1's [notes](docs/releases/v0.3.1.md) are written, and a dry run of the release installs the wheel, the
-sdist and the two-wheel `[npu]` set in fresh environments. The tag and the releases are not cut.
-
-- [ ] Tag v0.3.1 and publish it on GitHub and GitLab with both wheels, the sdist and SHA-256 sums.
 - [ ] Add installing from a release page to the README's Install section, beside the editable checkouts.
 - [ ] ignite-xdna is on no package index, so the `npu` extra resolves only with its wheel beside Ignition's.
   Decide whether to publish both to PyPI.
