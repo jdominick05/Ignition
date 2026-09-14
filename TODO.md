@@ -44,6 +44,10 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   reading the task from the container manifest or the ONNX outputs by default, and `--json` writes each run's
   summary. With ignite-xdna `68c2fea` on `bus.jpg`, YOLOv8s ran at 17.22 ms and SESR M7 at 6.59 ms mean
   glass-to-glass on the NPU, and ResNet50 classified on the CPU at 30.49 ms ([README](README.md#other-models)).
+- [x] **Suite runner in Ignition:** `ignition suite MODEL...` runs each model in its own `ignition.live` process
+  and writes one JSON record and log per model plus an index, refusing an existing output directory. The app
+  moved into the package as `ignition.live`; `live_ignition.py` launches it from a checkout
+  ([README](README.md#6-compare-models-in-one-command)).
 
 ## Active
 
@@ -67,7 +71,9 @@ On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.6
 
 - [ ] Raise the `npu` extra's minimum to the first ignite-xdna release that ships `pipelines/sr_pipeline.py`,
   which Ignition's super-resolution path imports; no ignite-xdna release has it yet.
-- [ ] Move the suite runner into Ignition as one command that writes a JSON record per model.
+- [ ] ignite-xdna's `tools/model_zoo_bench.py` still runs `live_ignition.py` from a sibling checkout and writes one
+  JSON file per suite for `docs/MODEL_ZOO_BENCHMARKS.md`'s tables. Point it at `ignition suite`'s records or
+  retire it (an ignite-xdna change).
 - [ ] yolo11n_no_c2psa finds nothing on `bus.jpg` (C2PSA removed), so check it detects before lowering it.
   ResNet50 has no `.ignite` lowering yet.
 - [ ] SESR M7 dispatch is 4.25 ms against a 1.5 ms target, with a 2.53 ms non-compute floor (§4).

@@ -90,7 +90,7 @@ For `.onnx` models on the CPU only:
 pip install ./ignition_ai-0.3.1-py3-none-any.whl
 ```
 
-The wheels carry the Python API and the `ignition` command. The webcam app `live_ignition.py` lives in the repository, not the wheel, and the container is still built in an ignite-xdna checkout. v0.3.1 predates the backend, camera, native-decode and model-zoo changes listed in [TODO.md](TODO.md)'s completed work.
+The wheels carry the Python API and the `ignition` command, and the container is still built in an ignite-xdna checkout. v0.3.1 predates the backend, camera, native-decode, model-zoo and suite changes listed in [TODO.md](TODO.md)'s completed work: its wheels have no webcam app, which the package now holds as `ignition.live` and a checkout's `live_ignition.py` launches.
 
 **From source**, which the steps below use:
 
@@ -198,6 +198,16 @@ python live_ignition.py --model ../ignite-xdna/build/sesr_m7.ignite --source exa
 python live_ignition.py --model ../ignite-xdna/models/resnet50_xint8_c64.onnx --source examples/assets/bus.jpg   # top 5, CPU
 ```
 
+### 6. Compare models in one command
+
+```bash
+ignition suite ../ignite-xdna/build/yolov8n_full.ignite ../ignite-xdna/models/yolov8n_cut_xint8.onnx --out results/suite-yolov8n
+```
+
+- **One process per model:** each model runs through the app in its own process (`python -m ignition.live --headless`), on `examples/assets/bus.jpg` unless `--source` names another image, video or webcam, with `--warmup` (default 10) untimed and `--frames` (default 300) timed frames.
+- **One record per model:** `--out` gets `<model>.json`, which holds the app's `--json` summary plus the command, its return code, the Ignition and ignite-xdna versions with `git describe --dirty` of their checkouts, and, for an `.ignite` container, what `xrt-smi` reported before and after the run. A `<model>.log` and an `index.json` sit beside them. Checkout paths, the output directory and the Windows profile directory appear as labels.
+- **Nothing overwritten:** an existing `--out` directory is refused. The command exits 1 if a run fails, records no timed frames, or starts while another hardware context is on the NPU, which would make its latency contention.
+
 ## Performance
 
 The table's figures come from YOLOv8n on NPU Device 0 of a Ryzen 7 8700G; [other models](#other-models) follow it:
@@ -279,15 +289,17 @@ Open work is tracked in [TODO.md](TODO.md).
 
 ```
 Ignition/
-├── live_ignition.py           # webcam / video / image app: detect, classify or upscale; percentiles, --json
+├── live_ignition.py           # launches ignition.live from this checkout
 ├── src/ignition/
 │   ├── __init__.py            # compile(), devices()
+│   ├── live.py                # webcam / video / image app: detect, classify or upscale; percentiles, --json
+│   ├── suite.py               # ignition suite: one ignition.live process and JSON record per model
 │   ├── pipelines/yolo.py      # YOLOPipeline: .ignite on the NPU via ignite-xdna, .onnx on ONNX Runtime
 │   ├── pipelines/vision.py    # task inference, ClassificationPipeline, SuperResolutionPipeline
 │   ├── pipelines/streaming.py # 3-stage asynchronous runner for .onnx models
 │   ├── backends/              # xdna1 layer backend, ONNX Runtime CPU backend
 │   ├── model.py, devices.py   # Model API, NPU discovery
-│   └── cli/main.py            # ignition devices | run | benchmark | detect
+│   └── cli/main.py            # ignition devices | run | benchmark | detect | suite
 ├── examples/                  # yolo_vision_demo.py, quickstart.py, assets/bus.jpg
 ├── TODO.md                    # completed milestones and open work
 └── pyproject.toml             # package ignition-ai, console script `ignition`
