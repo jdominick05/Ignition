@@ -1,8 +1,8 @@
 # Ignition TODO
 
-State of `main` at `6ae572d` (2026-09-14, version 0.3.0). Measured figures name the commit whose message
-records the run; Ignition does not track benchmark logs (`results/` is gitignored). How the pipeline works is
-in the [README](README.md#how-a-frame-runs).
+State of `main` on 2026-09-14 (version 0.3.1). Measured figures name the commit whose message records the run;
+Ignition does not track benchmark logs (`results/` is gitignored). How the pipeline works is in the
+[README](README.md#how-a-frame-runs).
 
 ## Completed
 
@@ -17,7 +17,7 @@ in the [README](README.md#how-a-frame-runs).
 - [x] **Consumer README** (`13157f8`, `6100486`): same-sitting comparison with AMD's stack and a compatibility
   matrix.
 - [x] **pip install** (`60a7be1`, ignite-xdna `389f0a7`): Ignition's wheel and sdist install on their own; the
-  `npu` extra with ignite-xdna's wheel adds the NPU path. Version 0.3.0 with release notes (`6ae572d`).
+  `npu` extra with ignite-xdna's wheel adds the NPU path.
 
 ## Active
 
@@ -86,16 +86,16 @@ ignite-xdna `results/model_zoo/` on that branch, G2G means:
 
 ### 5. Release and distribution
 
-v0.3.0's [notes](docs/releases/v0.3.0.md) are written, and a dry run of the release at `6ae572d` installs the
-wheel, the sdist and the two-wheel `[npu]` set in fresh environments. The tag and the releases are not cut.
+v0.3.1's [notes](docs/releases/v0.3.1.md) are written, and a dry run of the release installs the wheel, the
+sdist and the two-wheel `[npu]` set in fresh environments. The tag and the releases are not cut.
 
-- [ ] Tag v0.3.0 and publish it on GitHub and GitLab with both wheels, the sdist and SHA-256 sums.
+- [ ] Tag v0.3.1 and publish it on GitHub and GitLab with both wheels, the sdist and SHA-256 sums.
 - [ ] Add installing from a release page to the README's Install section, beside the editable checkouts.
 - [ ] ignite-xdna is on no package index, so the `npu` extra resolves only with its wheel beside Ignition's.
   Decide whether to publish both to PyPI.
 - [ ] No `.ignite` container ships, so the NPU path still needs the mlir-aie toolchain. Decide whether a
   prebuilt `yolov8n_full.ignite` can be attached to a release, after checking the model's licence.
-- [ ] The published v0.2.0 notes still quote the figures v0.3.0 corrects. Decide whether to edit them.
+- [ ] The published v0.2.0 notes still quote the figures v0.3.1 corrects. Decide whether to edit them.
 - **Done when:** the README's install commands, copied from a release page, work in a fresh environment.
 
 ### 6. Hardware and Python coverage
