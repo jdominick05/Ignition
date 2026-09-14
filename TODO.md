@@ -28,6 +28,8 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
 - [x] **Install from a release:** the README's Install section gives the release page's pip commands beside the
   editable checkouts, and both commands work from wheels downloaded from the v0.3.1 release into fresh
   environments.
+- [x] **Python coverage:** the CPU install from source passes on Python 3.10, 3.11, 3.12 and 3.13. The NPU path
+  needs the Python `pyxrt` links (3.13 with XRT 2.21.0), and the README says so.
 
 ## Active
 
@@ -79,14 +81,12 @@ ignite-xdna `results/model_zoo/` on that branch, G2G means:
   prebuilt `yolov8n_full.ignite` can be attached to a release, after checking the model's licence.
 - [ ] The published v0.2.0 notes still quote the figures v0.3.1 corrects. Decide whether to edit them.
 
-### 4. Hardware and Python coverage
+### 4. Hardware coverage
 
-Only Phoenix on Windows 11 with Python 3.13 is verified ([README](README.md#compatibility)).
+Only Phoenix on Windows 11 is verified ([README](README.md#compatibility)).
 
 - [ ] Run the `.ignite` path on a Hawk Point NPU (same XDNA1 generation) and record it before calling it
   supported.
-- [ ] The package declares Python 3.10 or later, but the XRT SDK's `pyxrt` is built for 3.13. Test the CPU
-  install on 3.10–3.12 and state that the NPU path needs the Python `pyxrt` was built for.
 
 ### 5. NPU dispatch time (ignite-xdna)
 
