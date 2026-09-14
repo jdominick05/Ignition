@@ -22,24 +22,13 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   [notes](docs/releases/v0.3.1.md); every file was downloaded back from both hosts and matched the sums.
 - [x] **Honest backends:** an `.onnx` model runs on ONNX Runtime's CPU execution provider with no NPU call, and
   says so; `ignition devices` prints only what `pyxrt` reports (name, BDF, XRT and NPU driver versions).
+- [x] **Camera rate:** the webcam's auto exposure sets its rate, not the backend or pixel format: 30 distinct fps
+  in a bright room, 15 in a dim one. `live_ignition.py` reports the read and distinct rate and takes
+  `--camera-backend`; `--exposure-priority off` holds 30 fps in dim light, with a darker image and fewer detections.
 
 ## Active
 
-### 1. Camera rate: 30 fps from the webcam
-
-The test webcam delivers 15 fps at 640×480 through DirectShow whatever rate or FOURCC is requested, even in a
-lit room (`8ffa482`); Media Foundation delivered 30 fps when both were probed on 2026-09-14. `ThreadedCamera`
-requests no format at all.
-
-- [ ] Log the negotiated `CAP_PROP_FOURCC`, `CAP_PROP_FPS` and `CAP_PROP_AUTO_EXPOSURE` on the `[camera]` line.
-- [ ] Try MJPG at 30 fps on DirectShow (FOURCC, then size, then rate, auto-exposure priority off), judged by the
-  measured frame arrival rate, not the property read-back.
-- [ ] If DirectShow stays at 15 fps, prefer Media Foundation when it opens within the timeout, or add a
-  `--backend dshow|msmf|any` flag.
-- **Done when:** `live_ignition.py --headless --frames 300 --fresh` reports about 30 FPS with 310 distinct
-  source frames.
-
-### 2. Post-processing in native code
+### 1. Post-processing in native code
 
 DFL decode and NMS take 0.27–0.33 ms per frame with 5–6 objects in view and 0.05 ms on an empty scene
 (`8ffa482`). The code is ignite-xdna's `YoloDecoder.postprocess` (`pipelines/yolo_pipeline.py`): numpy DFL
@@ -51,7 +40,7 @@ decode, then `cv2.dnn.NMSBoxesBatched` over lists built with `.tolist()`.
 - [ ] Before switching, require boxes identical to the numpy path on `bus.jpg` and on recorded camera frames.
 - **Target:** at or under 0.05 ms with objects in view, about 0.25 ms back per frame (0.30 − 0.05).
 
-### 3. Model zoo in Ignition
+### 2. Model zoo in Ignition
 
 Two unlanded branches hold this work, and neither fast-forwards onto its `main` any more:
 
@@ -77,9 +66,9 @@ ignite-xdna `results/model_zoo/` on that branch, G2G means:
 - [ ] Move the suite runner into Ignition as one command that writes a JSON record per model.
 - [ ] yolo11n_no_c2psa finds nothing on `bus.jpg` (C2PSA removed), so check it detects before lowering it.
   ResNet50 has no `.ignite` lowering yet.
-- [ ] SESR M7 dispatch is 4.25 ms against a 1.5 ms target, with a 2.53 ms non-compute floor (§6).
+- [ ] SESR M7 dispatch is 4.25 ms against a 1.5 ms target, with a 2.53 ms non-compute floor (§5).
 
-### 4. Release and distribution
+### 3. Release and distribution
 
 - [ ] Add installing from a release page to the README's Install section, beside the editable checkouts.
 - [ ] ignite-xdna is on no package index, so the `npu` extra resolves only with its wheel beside Ignition's.
@@ -89,7 +78,7 @@ ignite-xdna `results/model_zoo/` on that branch, G2G means:
 - [ ] The published v0.2.0 notes still quote the figures v0.3.1 corrects. Decide whether to edit them.
 - **Done when:** the README's install commands, copied from a release page, work in a fresh environment.
 
-### 5. Hardware and Python coverage
+### 4. Hardware and Python coverage
 
 Only Phoenix on Windows 11 with Python 3.13 is verified ([README](README.md#compatibility)).
 
@@ -98,7 +87,7 @@ Only Phoenix on Windows 11 with Python 3.13 is verified ([README](README.md#comp
 - [ ] The package declares Python 3.10 or later, but the XRT SDK's `pyxrt` is built for 3.13. Test the CPU
   install on 3.10–3.12 and state that the NPU path needs the Python `pyxrt` was built for.
 
-### 6. NPU dispatch time (ignite-xdna)
+### 5. NPU dispatch time (ignite-xdna)
 
 AMD's NPU stage is about 0.8 ms faster than Ignition's on the same model and image (`d42d33e`). Most of
 Ignition's dispatch is activations moving between host memory and the NPU: 5.37 ms of a 7.39 ms dispatch with

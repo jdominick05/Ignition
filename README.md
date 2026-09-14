@@ -113,6 +113,7 @@ More ways to run it:
 
 ```bash
 python live_ignition.py --headless --frames 300 --fresh   # wait for each new camera frame (camera-paced)
+python live_ignition.py --headless --frames 300 --fresh --exposure-priority off   # hold the camera's frame rate in dim light
 python live_ignition.py --model ../ignite-xdna/build/yolov8n_full.ignite --source examples/assets/bus.jpg --headless --frames 300
 python live_ignition.py --model ../ignite-xdna/models/yolov8n_cut_xint8.onnx --source examples/assets/bus.jpg --headless --frames 300   # CPU path
 ```
@@ -127,6 +128,8 @@ python live_ignition.py --model ../ignite-xdna/models/yolov8n_cut_xint8.onnx --s
 | `--fresh` | Wait for a new camera frame before each inference instead of reusing the newest one. |
 | `--conf`, `--iou` | Confidence and NMS IoU thresholds (defaults 0.25 and 0.45). |
 | `--open-timeout` | Seconds allowed for each camera backend to open (default 8). |
+| `--camera-backend` | `auto` (DirectShow, then Media Foundation, then OpenCV's default; the default), `dshow`, `msmf` or `any`. |
+| `--exposure-priority` | `keep` (default) leaves the webcam's setting. `off` holds the frame rate in dim light at the cost of a darker image; `on` lets auto exposure lower it. DirectShow only. The camera keeps this setting across programs, so the previous value is put back on exit; a killed process leaves it changed. |
 
 ### 3. Use it from Python
 
@@ -169,7 +172,7 @@ All figures come from YOLOv8n on NPU Device 0 of a Ryzen 7 8700G:
 | `--source` a 640×480 crop of `bus.jpg`, `--headless --frames 500` | still image | 500 | 4.00 | 7.86 ms | 8.39 ms | `ee66fbd` |
 | `--source examples/assets/bus.jpg --headless --frames 300` | still image, 810×1080 | 300 | 5.00 | 8.06 ms | 8.67 ms | re-check |
 
-- **Frame rate:** Ignition's processing loop ran at 122 to 129 frames per second, so the camera sets the live rate. The test webcam delivers 15 frames per second through DirectShow, which caps a live feed at 15 FPS; with `--fresh`, each new frame became detections 8.10 ms after it arrived.
+- **Frame rate:** Ignition's processing loop ran at 122 to 129 frames per second, so the camera sets the live rate, and the camera's auto exposure sets that. The test webcam, a Logitech C920, delivered 30 distinct frames per second in a bright room and 15 in a dim one, whatever rate or pixel format was requested. In the dim room `--exposure-priority off` held 30, with 2.43 detections per frame against 5.55–6.06 at 15. Media Foundation reads at 30 fps partly by repeating frames, so the `[summary] camera:` line counts the distinct ones. With `--fresh`, each new frame became detections 8.10 ms after it arrived.
 - **Busy scenes:** with 5–6 objects in view, decoding and NMS take 0.25–0.33 ms, against 0.05 ms on an empty scene.
 - **Long runs:** resident memory did not grow: −1.12 MB over 500 webcam frames in a lit room, −1.15 MB over 500 in a dark one, +0.02 MB over 500 frames of a still image.
 - **Clean exit:** every run exited cleanly and released the NPU; afterwards `xrt-smi` reported no hardware contexts running.
@@ -200,14 +203,14 @@ Latency is measured glass to glass: from the moment the loop takes a frame to th
 These stage times come from the webcam re-check above: 640×480 frames with 5.43 objects per frame. A larger source costs more at ingress; the 810×1080 `bus.jpg` in the AMD comparison took 0.34–0.43 ms.
 - **What the NPU time is spent on:** activations move between host memory and the NPU between layers, so most of the dispatch is data movement. A copy of the container with every weight operation switched off still took 5.37 ms of a 7.39 ms dispatch (ignite-xdna `results/model_zoo/dispatch_floor_yolov8n_full.json`).
 - **The CPU fallback:** an `.onnx` model runs the same steps on ONNX Runtime's CPU execution provider instead.
-- **The camera:** a capture thread (`ThreadedCamera`) owns the webcam so sensor I/O never stalls inference. It tries DirectShow, then Media Foundation, abandons a backend that does not open within `--open-timeout`, and skips empty frames. q, ESC, closing the window, Ctrl+C and Ctrl+Break all release the camera and the NPU.
+- **The camera:** a capture thread (`ThreadedCamera`) owns the webcam so sensor I/O never stalls inference. It tries DirectShow, then Media Foundation, abandons a backend that does not open within `--open-timeout`, and skips empty frames. It counts the frames it reads and the ones that repeat the previous frame. q, ESC, closing the window, Ctrl+C and Ctrl+Break all release the camera and the NPU.
 
 ## Limitations
 
 - **One NPU model today.** YOLOv8n is the only model with a released `.ignite` container. Other ONNX models run, but on the CPU.
 - **A build step.** The `.ignite` container is built from AMD Quark's quantized model with ignite-xdna and the mlir-aie toolchain; it is not a pip install.
 - **Narrow hardware support.** Only Phoenix has been verified. Hawk Point is untested, and Strix-class NPUs and Linux are not supported.
-- **The camera limits live frame rate.** On the test webcam that is 15 fps through DirectShow; see [TODO.md](TODO.md#1-camera-rate-30-fps-from-the-webcam).
+- **Dim light halves the webcam's frame rate.** The test webcam's auto exposure drops to 15 fps in a dim room; `--exposure-priority off` holds 30 fps with a darker image and fewer detections.
 Open work is tracked in [TODO.md](TODO.md).
 
 ## Project layout
