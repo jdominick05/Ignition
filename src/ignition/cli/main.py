@@ -238,6 +238,51 @@ def detect_objects(model_path, input_path, output_path, backend, conf, iou, stre
         pipeline.close()
 
 
+@cli.command("suite")
+@click.argument("models", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False))
+@click.option("--source", "-s", default=None,
+              help="Image, video or webcam index every model runs on (default: examples/assets/bus.jpg of this checkout).")
+@click.option("--frames", "-n", default=300, show_default=True, type=click.IntRange(min=1),
+              help="Timed frames per model.")
+@click.option("--warmup", "-w", default=10, show_default=True, type=click.IntRange(min=0),
+              help="Untimed frames per model before the timed ones.")
+@click.option("--out", "-o", "out_dir", default=None, type=click.Path(file_okay=False),
+              help="New directory for the records (default: suite-<UTC time> in the current directory); "
+                   "an existing directory is refused.")
+@click.option("--timeout", default=1800.0, show_default=True, type=float, help="Seconds allowed per model process.")
+def run_model_suite(models, source, frames, warmup, out_dir, timeout):
+    """Run each model in its own ignition.live process and write one JSON record per model."""
+    from ignition.suite import default_source, format_table, run_suite
+
+    src = source if source is not None else default_source()
+    if src is None:
+        click.secho("[-] No --source given, and there is no examples/assets/bus.jpg next to this package", fg="red")
+        sys.exit(2)
+    out = Path(out_dir) if out_dir else Path.cwd() / time.strftime("suite-%Y%m%dT%H%M%SZ", time.gmtime())
+    click.echo("================================================================================")
+    click.echo("IGNITION MODEL SUITE")
+    click.echo("================================================================================")
+    click.echo(f"Models:  {len(models)}, one process each")
+    click.echo(f"Source:  {src}")
+    click.echo(f"Frames:  {frames} timed after {warmup} warm-up")
+    click.echo(f"Records: {out}")
+    click.echo("--------------------------------------------------------------------------------")
+    try:
+        index = run_suite([Path(m) for m in models], out, str(src), frames, warmup, timeout, echo=click.echo)
+    except (FileExistsError, FileNotFoundError, ValueError) as exc:
+        click.secho(f"[-] {exc}", fg="red")
+        sys.exit(2)
+    click.echo("================================================================================")
+    for line in format_table(index):
+        click.echo(line)
+    click.echo("================================================================================")
+    if not index["all_ok"]:
+        failed = ", ".join(r["model"] for r in index["records"] if r["problems"])
+        click.secho(f"[-] Problems in {failed}; every record is in {out}", fg="red", bold=True)
+        sys.exit(1)
+    click.secho(f"[+] {len(index['records'])} records written to {out}", fg="green", bold=True)
+
+
 if __name__ == "__main__":
     cli()
 
