@@ -63,7 +63,8 @@ def run_model(model_path, input_path, backend):
         synth_input = np.zeros((1, 8, 32, 32), dtype=np.int8)
         output = model.predict(synth_input)
 
-    click.secho("[+] Inference successfully completed on physical silicon!", fg="green")
+    where = "on physical silicon" if backend == "xdna1" else "on the CPU"
+    click.secho(f"[+] Inference successfully completed {where}!", fg="green")
     click.echo(f"    Output Tensor Shape: {output.shape}")
     click.echo(f"    Output Tensor Dtype: {output.dtype}")
     click.echo(f"    Sample Values (first 8 bytes): {output.flatten()[:8].tolist()}")
@@ -175,6 +176,10 @@ def detect_objects(model_path, input_path, output_path, backend, conf, iou, stre
         click.secho(f"[-] Pipeline compilation error: {e}", fg="red")
         sys.exit(1)
 
+    device = "NPU" if getattr(pipeline, "is_native", False) else "CPU"
+    runs_on = "NPU" if device == "NPU" else "CPU (ONNX Runtime)"
+    click.echo(f"[*] Inference runs on the {runs_on}")
+
     try:
         if benchmark:
             click.echo(f"[*] Benchmarking sustained streaming throughput over {frames} frames...")
@@ -198,13 +203,13 @@ def detect_objects(model_path, input_path, output_path, backend, conf, iou, stre
 
             click.echo()
             click.echo("================================================================================")
-            click.secho(f"Ignition Streaming Benchmark Report ({backend.upper()})", fg="cyan", bold=True)
+            click.secho(f"Ignition Streaming Benchmark Report ({runs_on})", fg="cyan", bold=True)
             click.echo("================================================================================")
             click.echo(f"Total Stream Frames Processed: {len(results)}")
             click.echo(f"Total Stream Elapsed Time:     {elapsed_s * 1000.0:.2f} ms")
             click.secho(f"Sustained Pipelined Throughput: {fps:.2f} FPS", fg="green", bold=True)
             click.echo(f"Average Preprocessing Latency:  {np.mean(pre_lat):.2f} ms")
-            click.echo(f"Average Backbone NPU Latency:  {np.mean(back_lat):.2f} ms")
+            click.echo(f"Average {device} Inference Latency:  {np.mean(back_lat):.2f} ms")
             click.echo(f"Average Postprocess/NMS Lat:   {np.mean(post_lat):.2f} ms")
             click.echo(f"Median End-to-End Latency:     {np.median(tot_lat):.2f} ms")
             click.echo(f"P95 End-to-End Latency:        {np.percentile(tot_lat, 95):.2f} ms")

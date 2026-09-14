@@ -2,88 +2,81 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """
 src/ignition/devices.py
-Hardware discovery and topology inspection for AMD Ryzen AI XDNA1 NPUs.
+NPU discovery through pyxrt. Every field is what XRT reports for the device; nothing is filled in.
 """
 
-import os
+import json
+import logging
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
+
+_log = logging.getLogger("ignition")
 
 
 @dataclass
 class DeviceInfo:
-    """Descriptor for an available physical AMD XDNA / AIE2 accelerator."""
+    """An AMD XDNA NPU as pyxrt reports it. A value XRT does not return is ``None``."""
     device_id: int
     name: str
     bdf: str
-    architecture: str
-    num_cores: int
-    core_grid: str
-    memtile_sram_kb: int
-    tile_clock_ghz: float
-    peak_int8_tops: float
-    driver_status: str
+    xrt_version: Optional[str]
+    driver_version: Optional[str]
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "device_id": self.device_id,
             "name": self.name,
             "bdf": self.bdf,
-            "architecture": self.architecture,
-            "num_cores": self.num_cores,
-            "core_grid": self.core_grid,
-            "memtile_sram_kb": self.memtile_sram_kb,
-            "tile_clock_ghz": self.tile_clock_ghz,
-            "peak_int8_tops": self.peak_int8_tops,
-            "driver_status": self.driver_status,
+            "xrt_version": self.xrt_version,
+            "driver_version": self.driver_version,
         }
 
     def __str__(self) -> str:
         return (
             f"Device {self.device_id}: {self.name} [{self.bdf}]\n"
-            f"  Architecture:    {self.architecture} ({self.num_cores} Cores, {self.core_grid})\n"
-            f"  On-Chip SRAM:    {self.memtile_sram_kb} KB L2 MemTile SRAM\n"
-            f"  Tile Frequency:  {self.tile_clock_ghz:.2f} GHz\n"
-            f"  Peak Compute:    {self.peak_int8_tops:.2f} INT8 TOPS\n"
-            f"  Status:          {self.driver_status}"
+            f"  XRT:         {self.xrt_version or 'not reported'}\n"
+            f"  NPU driver:  {self.driver_version or 'not reported'}"
         )
+
+
+def _host_versions(dev: Any, info: Any) -> Tuple[Optional[str], Optional[str]]:
+    """(XRT version, NPU driver version) from XRT's ``host`` report; ``None`` where XRT gives no value."""
+    try:
+        host = json.loads(dev.get_info(info.host))
+        drivers = host.get("drivers") or []
+        npu = [d for d in drivers if "NPU" in str(d.get("name", ""))]
+        driver = (npu or drivers or [{}])[0]
+        return host.get("version"), driver.get("version")
+    except Exception as exc:  # noqa: BLE001 - the versions are optional
+        _log.debug("[Ignition] pyxrt host report unavailable: %s: %s", type(exc).__name__, exc)
+        return None, None
 
 
 def probe_devices() -> List[DeviceInfo]:
     """
-    Probes system for physical AMD Phoenix/Hawk Point XDNA1 NPU accelerators.
-    Returns a list of detected DeviceInfo structures.
+    Probes NPU Device 0 through pyxrt.
+    Returns a one-element list when XRT opens it, otherwise an empty list.
     """
-    detected: List[DeviceInfo] = []
-
-    # Attempt pyxrt hardware discovery via ignite_xdna driver setup
     try:
         from ignite_xdna.runtime.driver import setup_xrt_environment
         setup_xrt_environment()
         import pyxrt
 
         dev = pyxrt.device(0)
-        if dev is not None:
-            detected.append(
-                DeviceInfo(
-                    device_id=0,
-                    name="AMD Ryzen 7 8700G (Phoenix)",
-                    bdf="003d:00:01.1",
-                    architecture="XDNA1 AIE2",
-                    num_cores=16,
-                    core_grid="4 Columns x 4 Rows (Tiles 0..3, 2..5)",
-                    memtile_sram_kb=2048,  # 4 MemTiles x 512 KB
-                    tile_clock_ghz=1.80,
-                    peak_int8_tops=14.75,
-                    driver_status="ONLINE (PyXRT ERT Ready)",
-                )
+        info = pyxrt.xrt_info_device
+        xrt_version, driver_version = _host_versions(dev, info)
+        return [
+            DeviceInfo(
+                device_id=0,
+                name=dev.get_info(info.name),
+                bdf=dev.get_info(info.bdf),
+                xrt_version=xrt_version,
+                driver_version=driver_version,
             )
-            return detected
-    except Exception:
-        pass
-
-    # If hardware or pyxrt unavailable, check Windows device registry or fallback
-    return detected
+        ]
+    except Exception as exc:  # noqa: BLE001 - no pyxrt, no driver or no NPU all mean "none detected"
+        _log.debug("[Ignition] pyxrt found no NPU: %s: %s", type(exc).__name__, exc)
+        return []
 
 
 def get_default_device() -> Optional[DeviceInfo]:

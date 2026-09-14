@@ -7,7 +7,8 @@ Integrates letterboxing, INT8 Conv2D feature backbone execution, anchor/DFL deco
 and per-class Non-Maximum Suppression (NMS).
 
 The model file selects the execution path:
-  * ``.onnx``: ONNX Runtime computes the head tensors; decode and NMS run here.
+  * ``.onnx``: ONNX Runtime's CPU execution provider computes the head tensors; decode and
+    NMS run here. The NPU is not used, whichever backend was requested.
   * ``.ignite`` (bare-metal ignite-xdna container, ``IGNT`` header magic): the whole
     network runs on the NPU through ``ignite_xdna.pipelines.yolo_pipeline.YoloPipeline``,
     one dispatch per frame with boxes decoded from the NPU's detect heads. ONNX
@@ -27,7 +28,6 @@ from PIL import Image
 
 from ..model import Model
 from ..backends.base import BenchmarkReport
-from ..backends.xdna1 import XDNA1Backend
 from ..backends.cpu import CPUBackend
 
 _log = logging.getLogger("ignition")
@@ -137,6 +137,13 @@ def is_ignite_container(model_path: Any) -> bool:
             return f.read(len(IGNITE_MAGIC)) == IGNITE_MAGIC
     except OSError:
         return False
+
+
+def note_onnx_runs_on_cpu(model_path: Path, backend: str) -> None:
+    """Warns when an NPU backend was requested for an ONNX model: it runs on ONNX Runtime's CPU provider."""
+    if backend in NATIVE_BACKENDS:
+        _log.warning("[Ignition] %s is an ONNX model: it runs on ONNX Runtime's CPU execution provider; "
+                     "only an .ignite container runs on the NPU", model_path.name)
 
 
 def load_bgr(image: Union[str, Path, np.ndarray, Image.Image], copy: bool = True) -> np.ndarray:
@@ -391,11 +398,12 @@ def _release_native(native: Any) -> None:
 class YOLOPipeline:
     """
     End-to-End YOLOv8 Object Detection Pipeline.
-    Manages image letterbox preprocessing, INT8 feature extraction across Phoenix AIE2 cores,
-    and CPU anchor decoding with per-class Non-Maximum Suppression.
+    Manages image letterbox preprocessing, the network, and CPU anchor decoding with
+    per-class Non-Maximum Suppression.
 
     An ``.ignite`` container is served natively by ignite-xdna on NPU ``device_id``
-    (``is_native``); any other model file goes through ONNX Runtime.
+    (``is_native``); any other model file runs on ONNX Runtime's CPU execution provider,
+    and ``backend_name`` is then ``"cpu"`` whichever backend was requested.
     """
 
     def __init__(
@@ -413,7 +421,6 @@ class YOLOPipeline:
         self.iou_thres = iou_thres
         self.device_id = device_id
         self.ort_session = None
-        self.hw_backend: Optional[XDNA1Backend] = None
         self.native: Optional[Any] = None  # ignite_xdna YoloPipeline for .ignite containers
         self.head_status: Optional[Any] = None
         self.is_native = is_ignite_container(self.model_path)
@@ -436,14 +443,9 @@ class YOLOPipeline:
         self.input_name = self.ort_session.get_inputs()[0].name
         self.output_names = [o.name for o in self.ort_session.get_outputs()]
 
-        # 2. Initialize XDNA1 AIE2 Hardware Engine if requested
-        if self.backend_name == "xdna1":
-            try:
-                self.hw_backend = XDNA1Backend(device_id=self.device_id)
-                self.hw_backend.load(str(self.model_path), **backend_kwargs)
-            except Exception as e:
-                # Hardware fallback or notification
-                pass
+        # 2. An ONNX model never reaches the NPU: only an .ignite container does
+        note_onnx_runs_on_cpu(self.model_path, self.backend_name)
+        self.backend_name = "cpu"
 
     def _init_native(self) -> None:
         """Opens an ``.ignite`` container on the NPU through ignite-xdna's YOLOv8n pipeline."""
@@ -510,17 +512,7 @@ class YOLOPipeline:
         t1 = time.perf_counter()
         preprocess_ms = (t1 - t0) * 1000.0
 
-        # 3. Feature Backbone Execution
-        # If running on XDNA1 silicon, execute sustained AIE2 hardware run
-        if self.hw_backend is not None:
-            # Physical silicon execution across 16 AIE2 cores
-            try:
-                # Hardware execution benchmark pulse
-                _ = self.hw_backend.run(inp_tensor)
-            except Exception:
-                pass
-
-        # Graph execution producing feature tensors
+        # 3. Head tensors from ONNX Runtime on the CPU
         t2 = time.perf_counter()
         raw_outputs = self.ort_session.run(None, {self.input_name: inp_tensor})
         t3 = time.perf_counter()
@@ -678,10 +670,7 @@ class YOLOPipeline:
                 init_us=0.0,
             )
 
-        if self.hw_backend is not None:
-            return self.hw_backend.benchmark(warmup=warmup, iterations=iterations)
-
-        # CPU fallback benchmark
+        # ONNX Runtime CPU benchmark
         dummy_in = np.zeros((1, 3, INPUT_SIZE, INPUT_SIZE), dtype=np.float32)
         for _ in range(warmup):
             self.ort_session.run(None, {self.input_name: dummy_in})
@@ -712,9 +701,6 @@ class YOLOPipeline:
         if self.native is not None:
             self.native = None
             self._native_finalizer()
-        if self.hw_backend is not None:
-            self.hw_backend.teardown()
-            self.hw_backend = None
 
     def __enter__(self):
         return self
