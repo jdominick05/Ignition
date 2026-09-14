@@ -74,8 +74,14 @@ On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.6
 - [ ] ignite-xdna's `tools/model_zoo_bench.py` still runs `live_ignition.py` from a sibling checkout and writes one
   JSON file per suite for `docs/MODEL_ZOO_BENCHMARKS.md`'s tables. Point it at `ignition suite`'s records or
   retire it (an ignite-xdna change).
-- [ ] yolo11n_no_c2psa finds nothing on `bus.jpg` (C2PSA removed), so check it detects before lowering it.
-  ResNet50 has no `.ignite` lowering yet.
+- [ ] YOLO11n detects only with its C2PSA attention block, so lowering it needs attention on the NPU or a model
+  retrained without the block (ignite-xdna work). Through Ignition on `bus.jpg`, on the CPU, stock YOLO11n finds
+  the bus and the people in FP32 and XINT8. The C2PSA-ablated `yolo11n_no_c2psa` finds nothing at confidence 0.25
+  in either: its highest class score is 0.02 in FP32 and 0.06 in XINT8. Ignition's decode of the cut model gives
+  the full model's output, so the cause is the ablation, not quantization or the decode. On COCO, ignite-xdna
+  measured mAP@50-95 0.19 for the ablated XINT8 model on AMD's Vitis AI EP, against 38.72 for stock FP32 on the
+  CPU (ignite-xdna `docs/BENCHMARKS.md`, its YOLOv11n section).
+- [ ] ResNet50 has no `.ignite` lowering yet.
 - [ ] SESR M7 dispatch is 4.25 ms against a 1.5 ms target, with a 2.53 ms non-compute floor (§4).
 
 ### 2. Release and distribution
