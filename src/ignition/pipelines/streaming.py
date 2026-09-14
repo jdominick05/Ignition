@@ -28,6 +28,7 @@ from .yolo import (
     decode_heads,
     postprocess_detections,
     draw_detections,
+    is_ignite_container,
 )
 from ..backends.base import BenchmarkReport
 from ..backends.xdna1 import XDNA1Backend
@@ -123,6 +124,12 @@ class AsyncYOLOPipeline:
         self.num_cores = num_cores
         self.ring_depth = max(2, ring_depth)
         self._closed = False
+
+        if is_ignite_container(self.model_path):
+            raise ValueError(
+                f"{self.model_path} is a bare-metal .ignite container: it runs one synchronous NPU "
+                "dispatch per frame through YOLOPipeline (ignition.compile(model, pipeline='yolo')), "
+                "not through the ONNX Runtime asynchronous pipeline")
 
         # 1. Initialize ONNX Runtime session for head feature extraction
         import onnxruntime as ort
