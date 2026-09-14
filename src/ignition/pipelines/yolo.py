@@ -5,8 +5,18 @@ src/ignition/pipelines/yolo.py
 End-to-end YOLOv8n object detection pipeline for AMD Phoenix XDNA1 / AIE2 silicon.
 Integrates letterboxing, INT8 Conv2D feature backbone execution, anchor/DFL decoding,
 and per-class Non-Maximum Suppression (NMS).
+
+The model file selects the execution path:
+  * ``.onnx``: ONNX Runtime computes the head tensors; decode and NMS run here.
+  * ``.ignite`` (bare-metal ignite-xdna container, ``IGNT`` header magic): the whole
+    network runs on the NPU through ``ignite_xdna.pipelines.yolo_pipeline.YoloPipeline``,
+    one dispatch per frame with boxes decoded from the NPU's detect heads. ONNX
+    Runtime is not called.
 """
 
+import logging
+import os
+import weakref
 from typing import List, Tuple, Dict, Any, Optional, Union
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,11 +30,15 @@ from ..backends.base import BenchmarkReport
 from ..backends.xdna1 import XDNA1Backend
 from ..backends.cpu import CPUBackend
 
+_log = logging.getLogger("ignition")
 
 INPUT_SIZE = 640
 STRIDES = (8, 16, 32)
 REG_MAX = 16
 NUM_CLASSES = 80
+
+IGNITE_MAGIC = b"IGNT"
+NATIVE_BACKENDS = ("xdna1", "npu", "aie2")
 
 COCO_CLASSES = [
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
@@ -65,11 +79,19 @@ class Detection:
 
 @dataclass
 class YOLOResult:
-    """Complete prediction result containing detections, annotated image, and timing metrics."""
+    """Complete prediction result containing detections, annotated image, and timing metrics.
+
+    ``head_source`` names where the boxes came from: ``"npu"`` (the NPU's detect
+    heads), ``"none"`` (an ``.ignite`` container without detect heads) or
+    ``"onnxruntime"``. ``pipeline_timings`` is ignite-xdna's ``PipelineTimings``
+    for NPU frames.
+    """
     detections: List[Detection]
     timings_ms: Dict[str, float]
     orig_shape: Tuple[int, int]
     image_annotated: Optional[np.ndarray] = None
+    head_source: Optional[str] = None
+    pipeline_timings: Optional[Any] = None
 
     def save(self, output_path: Union[str, Path]) -> Path:
         """Saves the annotated visual detection image to disk."""
@@ -93,11 +115,43 @@ class YOLOResult:
         lines.append(f"--- Pipeline Latency Breakdown ---")
         lines.append(f"  Preprocess (Letterbox + INT8): {self.timings_ms.get('preprocess_ms', 0.0):.2f} ms")
         lines.append(f"  Feature Backbone Inference:   {self.timings_ms.get('backbone_ms', 0.0):.2f} ms")
+        if "dispatch_ms" in self.timings_ms:
+            lines.append(f"    NPU Dispatch:                {self.timings_ms['dispatch_ms']:.2f} ms")
+            lines.append(f"    Head Readback:               {self.timings_ms.get('readback_ms', 0.0):.2f} ms")
         lines.append(f"  Head Decode + Per-Class NMS:   {self.timings_ms.get('postprocess_ms', 0.0):.2f} ms")
         lines.append(f"  Total End-to-End Latency:      {self.timings_ms.get('total_ms', 0.0):.2f} ms")
         fps = 1000.0 / self.timings_ms.get('total_ms', 1.0)
         lines.append(f"  End-to-End Throughput:         {fps:.1f} FPS")
         return "\n".join(lines)
+
+
+def is_ignite_container(model_path: Any) -> bool:
+    """True for an ignite-xdna ``.ignite`` container: the suffix, or the ``IGNT`` header magic."""
+    if not isinstance(model_path, (str, os.PathLike)):
+        return False
+    path = Path(model_path)
+    if path.suffix.lower() == ".ignite":
+        return True
+    try:
+        with path.open("rb") as f:
+            return f.read(len(IGNITE_MAGIC)) == IGNITE_MAGIC
+    except OSError:
+        return False
+
+
+def load_bgr(image: Union[str, Path, np.ndarray, Image.Image], copy: bool = True) -> np.ndarray:
+    """Returns the input as an HxWx3 BGR array; with ``copy=False`` an array is used as is."""
+    if isinstance(image, (str, Path)):
+        img_bgr = cv2.imread(str(image))
+        if img_bgr is None:
+            raise FileNotFoundError(f"Failed to read image at path: {image}")
+        return img_bgr
+    if isinstance(image, Image.Image):
+        rgb = np.array(image.convert("RGB"))
+        return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    if isinstance(image, np.ndarray):
+        return image.copy() if copy else image
+    raise TypeError(f"Unsupported image type: {type(image)}")
 
 
 _anchor_cache: Dict[Tuple[int, Tuple[int, ...]], Tuple[np.ndarray, np.ndarray]] = {}
@@ -296,9 +350,10 @@ def draw_detections(
     detections: List[Detection],
     box_color: Tuple[int, int, int] = (0, 230, 115),
     text_color: Tuple[int, int, int] = (0, 0, 0),
+    inplace: bool = False,
 ) -> np.ndarray:
-    """Draws styled bounding boxes and class score labels onto the BGR image."""
-    canvas = img_bgr.copy()
+    """Draws styled bounding boxes and class score labels onto the BGR image (a copy unless ``inplace``)."""
+    canvas = img_bgr if inplace else img_bgr.copy()
     for det in detections:
         x1, y1, x2, y2 = [int(round(v)) for v in det.xyxy]
         # Bounding box
@@ -325,11 +380,22 @@ def draw_detections(
     return canvas
 
 
+def _release_native(native: Any) -> None:
+    """Closes an ignite-xdna pipeline: its XRT hardware context and buffer objects."""
+    try:
+        native.close()
+    except Exception as exc:  # noqa: BLE001 - teardown must not raise
+        _log.warning("[Ignition] closing the native NPU pipeline failed: %s", exc)
+
+
 class YOLOPipeline:
     """
     End-to-End YOLOv8 Object Detection Pipeline.
     Manages image letterbox preprocessing, INT8 feature extraction across Phoenix AIE2 cores,
     and CPU anchor decoding with per-class Non-Maximum Suppression.
+
+    An ``.ignite`` container is served natively by ignite-xdna on NPU ``device_id``
+    (``is_native``); any other model file goes through ONNX Runtime.
     """
 
     def __init__(
@@ -346,6 +412,15 @@ class YOLOPipeline:
         self.conf_thres = conf_thres
         self.iou_thres = iou_thres
         self.device_id = device_id
+        self.ort_session = None
+        self.hw_backend: Optional[XDNA1Backend] = None
+        self.native: Optional[Any] = None  # ignite_xdna YoloPipeline for .ignite containers
+        self.head_status: Optional[Any] = None
+        self.is_native = is_ignite_container(self.model_path)
+
+        if self.is_native:
+            self._init_native()
+            return
 
         # 1. Initialize reference CPU execution session for head feature extraction
         import onnxruntime as ort
@@ -362,7 +437,6 @@ class YOLOPipeline:
         self.output_names = [o.name for o in self.ort_session.get_outputs()]
 
         # 2. Initialize XDNA1 AIE2 Hardware Engine if requested
-        self.hw_backend: Optional[XDNA1Backend] = None
         if self.backend_name == "xdna1":
             try:
                 self.hw_backend = XDNA1Backend(device_id=self.device_id)
@@ -371,31 +445,62 @@ class YOLOPipeline:
                 # Hardware fallback or notification
                 pass
 
+    def _init_native(self) -> None:
+        """Opens an ``.ignite`` container on the NPU through ignite-xdna's YOLOv8n pipeline."""
+        if self.backend_name not in NATIVE_BACKENDS:
+            raise ValueError(f"{self.model_path} is an .ignite container, which runs only on the NPU "
+                             f"(backend 'xdna1'), not on backend '{self.backend_name}'")
+        if not self.model_path.is_file():
+            raise FileNotFoundError(f".ignite container not found: {self.model_path}")
+        try:
+            from ignite_xdna.pipelines.yolo_pipeline import YoloPipeline
+        except ImportError as exc:
+            raise ImportError(".ignite containers need the ignite-xdna runtime "
+                              "(pip install -e ../ignite-xdna)") from exc
+
+        native = YoloPipeline(
+            model_path_or_bundle=self.model_path,
+            device_index=self.device_id,
+            conf_thres=self.conf_thres,
+            iou_thres=self.iou_thres,
+        )
+        # Boxes come from the NPU's detect heads only. ignite-xdna also opens an ONNX
+        # Runtime session over the cut model for oracle comparisons; drop it so no
+        # frame can reach ONNX Runtime and its memory is returned.
+        native._ort_cut_sess = None
+        self.native = native
+        self.backend_name = "xdna1"
+        # Closes the hardware context if close() is never called (collection or interpreter exit).
+        self._native_finalizer = weakref.finalize(self, _release_native, native)
+
+        self.head_status = getattr(native.session, "head_status", None)
+        _log.info("[Ignition] Native XDNA1 NPU backend active (Device %d)", self.device_id)
+        if self.head_status is not None and not self.head_status.present:
+            _log.warning(
+                "[Ignition] %s carries no NPU detect heads (%s): frames will have no detections. "
+                "Use the graph-engine container build/yolov8n_full.ignite (ignite-compile --engine graph).",
+                self.model_path.name, self.head_status.reason)
+
     def predict(
         self,
         image: Union[str, Path, np.ndarray, Image.Image],
         conf_thres: Optional[float] = None,
         iou_thres: Optional[float] = None,
+        annotate: bool = True,
     ) -> YOLOResult:
         """
         Runs complete object detection pipeline on input image.
-        Returns YOLOResult with detections, annotated image, and detailed latency metrics.
+        Returns YOLOResult with detections, annotated image (unless ``annotate=False``),
+        and detailed latency metrics.
         """
         conf = conf_thres if conf_thres is not None else self.conf_thres
         iou = iou_thres if iou_thres is not None else self.iou_thres
 
+        if self.is_native:
+            return self._predict_native(image, conf, iou, annotate)
+
         # 1. Load image to BGR numpy array
-        if isinstance(image, (str, Path)):
-            img_bgr = cv2.imread(str(image))
-            if img_bgr is None:
-                raise FileNotFoundError(f"Failed to read image at path: {image}")
-        elif isinstance(image, Image.Image):
-            rgb = np.array(image.convert("RGB"))
-            img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        elif isinstance(image, np.ndarray):
-            img_bgr = image.copy()
-        else:
-            raise TypeError(f"Unsupported image type: {type(image)}")
+        img_bgr = load_bgr(image, copy=True)
 
         orig_shape = (img_bgr.shape[0], img_bgr.shape[1])
 
@@ -444,7 +549,7 @@ class YOLOPipeline:
         total_ms = (t5 - t0) * 1000.0
 
         # 5. Visual annotation
-        annotated_img = draw_detections(img_bgr, detections)
+        annotated_img = draw_detections(img_bgr, detections) if annotate else None
 
         timings = {
             "preprocess_ms": preprocess_ms,
@@ -458,6 +563,54 @@ class YOLOPipeline:
             timings_ms=timings,
             orig_shape=orig_shape,
             image_annotated=annotated_img,
+            head_source="onnxruntime",
+        )
+
+    def _predict_native(
+        self,
+        image: Union[str, Path, np.ndarray, Image.Image],
+        conf: float,
+        iou: float,
+        annotate: bool,
+    ) -> YOLOResult:
+        """One NPU frame: ignite-xdna stages, dispatches, reads the heads back and decodes them.
+
+        Glass-to-glass (``g2g_ms`` = ``total_ms``) runs from the frame in memory to the
+        Detection list. A camera frame is used as is (no copy); ignite-xdna's native
+        preprocessor writes the quantized plane straight into the NPU workspace buffer.
+        """
+        native = self.native
+        if native is None:
+            raise RuntimeError("YOLOPipeline is closed")
+        img_bgr = load_bgr(image, copy=False)
+
+        t0 = time.perf_counter()
+        if native.conf_thres != conf or native.iou_thres != iou:
+            native.conf_thres, native.iou_thres = conf, iou
+        dets, hw = native.predict_sync(img_bgr, use_oracle_for_boxes=False)
+        # ignite-xdna boxes are (x0, y0, w, h) in source pixels, the same layout as Detection.
+        detections = [Detection(d.x0, d.y0, d.w, d.h, d.score, d.class_id, d.class_name) for d in dets]
+        g2g_ms = (time.perf_counter() - t0) * 1000.0
+
+        timings = {
+            "preprocess_ms": hw.preprocess_ms,
+            "backbone_ms": hw.npu_forward_ms,
+            "postprocess_ms": hw.postprocess_ms,
+            "g2g_ms": g2g_ms,
+            "total_ms": g2g_ms,
+        }
+        dispatch_ms = getattr(native.session, "last_dispatch_ms", None)
+        if dispatch_ms is not None:
+            timings["dispatch_ms"] = float(dispatch_ms)
+            timings["readback_ms"] = max(hw.npu_forward_ms - float(dispatch_ms), 0.0)
+
+        return YOLOResult(
+            detections=detections,
+            timings_ms=timings,
+            orig_shape=(img_bgr.shape[0], img_bgr.shape[1]),
+            image_annotated=draw_detections(img_bgr, detections) if annotate else None,
+            head_source=hw.head_source,
+            pipeline_timings=hw,
         )
 
     def stream(
@@ -470,7 +623,13 @@ class YOLOPipeline:
         """
         Streams frames using the high-performance 3-stage asynchronous pipelined runner.
         Overlaps preprocessing and postprocessing/NMS with physical silicon feature extraction.
+        An ``.ignite`` container streams synchronously: one NPU dispatch per frame, in order.
         """
+        if self.is_native:
+            for item in frame_iterator:
+                yield self.predict(item, conf_thres=conf_thres, iou_thres=iou_thres, annotate=annotate)
+            return
+
         from .streaming import AsyncYOLOPipeline
         async_pipe = AsyncYOLOPipeline(
             model_path=self.model_path,
@@ -495,9 +654,33 @@ class YOLOPipeline:
         iterations: int = 100
     ) -> BenchmarkReport:
         """Benchmarks sustained feature extraction throughput."""
+        if self.is_native:
+            # Whole-frame NPU latency (preprocess to detections) on a mid-grey 640x640 frame
+            frame = np.full((INPUT_SIZE, INPUT_SIZE, 3), 114, dtype=np.uint8)
+            for _ in range(warmup):
+                self.predict(frame, annotate=False)
+            latencies = []
+            t_start = time.perf_counter()
+            for _ in range(iterations):
+                latencies.append(self.predict(frame, annotate=False).timings_ms["total_ms"] * 1000.0)
+            elapsed_s = time.perf_counter() - t_start
+            lat = np.array(latencies)
+            mean_us = float(np.mean(lat))
+            return BenchmarkReport(
+                backend_name="xdna1",
+                iterations=iterations,
+                mean_us=mean_us,
+                median_us=float(np.median(lat)),
+                min_us=float(np.min(lat)),
+                p95_us=float(np.percentile(lat, 95)),
+                fps=iterations / elapsed_s if elapsed_s > 0 else 0.0,
+                intermediate_ddr_bytes=0,
+                init_us=0.0,
+            )
+
         if self.hw_backend is not None:
             return self.hw_backend.benchmark(warmup=warmup, iterations=iterations)
-        
+
         # CPU fallback benchmark
         dummy_in = np.zeros((1, 3, INPUT_SIZE, INPUT_SIZE), dtype=np.float32)
         for _ in range(warmup):
@@ -525,7 +708,16 @@ class YOLOPipeline:
         )
 
     def close(self):
-        """Releases hardware resources."""
+        """Releases hardware resources (the NPU hardware context and buffer objects); safe to call again."""
+        if self.native is not None:
+            self.native = None
+            self._native_finalizer()
         if self.hw_backend is not None:
             self.hw_backend.teardown()
             self.hw_backend = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()

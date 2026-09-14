@@ -138,6 +138,28 @@ Speedup vs ORT CPU: 11.49x
 ================================================================================
 ```
 
+### 4. Bare-Metal `.ignite` Containers and the Live Camera
+
+An `.ignite` container compiled by ignite-xdna runs the whole YOLOv8n network on the NPU. `YOLOPipeline` recognises it by its extension or its `IGNT` header and serves it through ignite-xdna's native runtime instead of ONNX Runtime: one NPU dispatch per frame, with boxes decoded from the NPU's detect heads. `.onnx` models keep the ONNX Runtime path.
+
+```python
+import ignition
+
+with ignition.compile("../ignite-xdna/build/yolov8n_full.ignite", pipeline="yolo") as pipe:
+    result = pipe.predict("examples/assets/bus.jpg")
+    print(result.summary())  # includes the NPU dispatch and head readback times
+```
+
+`live_ignition.py` runs the pipeline on a webcam, a video or an image. Run it in the `mlir-aie-iron` environment, where pyxrt loads:
+
+```bash
+python live_ignition.py                           # webcam 0 in a window; q or ESC quits
+python live_ignition.py --headless --frames 300   # G2G mean, P50, P95, P99 and RSS drift
+python live_ignition.py --source clip.mp4 --model ../ignite-xdna/models/yolov8n_cut_xint8.onnx
+```
+
+The default model is ignite-xdna's graph-engine container `build/yolov8n_full.ignite`, falling back to `build/yolov8n.ignite`, which carries no detect heads and therefore draws no boxes. Glass-to-glass (G2G) is timed from the frame in memory to its detections; drawing and display come after it.
+
 ---
 
 ## Architectural Overview
@@ -194,13 +216,14 @@ Ignition/
 │       │   ├── xdna1.py       # Production AMD Phoenix XDNA1 / AIE2 backend
 │       │   └── cpu.py         # Reference ONNX Runtime CPU backend
 │       ├── pipelines/
-│       │   ├── yolo.py        # YOLOv8 end-to-end decode, NMS, visualizer
+│       │   ├── yolo.py        # YOLOv8 decode, NMS, visualizer; .onnx via ONNX Runtime, .ignite on the NPU
 │       │   └── streaming.py   # 3-stage async pipelined execution runner
 │       └── cli/
 │           └── main.py        # Click CLI (devices, run, benchmark, detect)
 ├── examples/
 │   ├── quickstart.py          # 10-line runnable inference example
 │   └── yolo_vision_demo.py    # Physical silicon YOLOv8 streaming vision demo
+├── live_ignition.py           # Live webcam / video / image detection with G2G percentiles
 ├── pyproject.toml             # Modern Setuptools / PEP 621 packaging
 ├── LICENSE                    # GNU Affero General Public License v3.0 (AGPL-3.0)
 └── README.md
