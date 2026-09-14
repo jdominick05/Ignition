@@ -19,24 +19,24 @@
 
 Ignition runs YOLOv8n object detection on the NPU built into AMD Ryzen AI processors. All 66 layers of the network run on the NPU, not your CPU. Point it at a webcam and each captured frame becomes labelled boxes in about 8 milliseconds.
 
-- **About 26% lower end-to-end latency than AMD's stack.** The same model and image took 8.09–8.27 ms per frame through Ignition and 11.09–11.13 ms through AMD's ONNX Runtime Vitis AI execution provider, measured back to back on the same machine.
-- **Inference about 5× faster than on the CPU.** The network itself took 7.5 ms on the NPU and 37.0 ms on ONNX Runtime's CPU path, for the same model and image. End to end, a frame took 8.1–8.3 ms against 41.6 ms.
-- **Lighter to install and run.** Resident memory was 192 MB against AMD's 306–308 MB (37% less), and the runtime install is about 318 MB against 4.7 GB (93% smaller).
+- **About 25% lower end-to-end latency than AMD's stack.** The same model and image took 7.75–7.78 ms per frame through Ignition and 10.33–10.37 ms through AMD's ONNX Runtime Vitis AI execution provider, measured back to back on the same machine.
+- **Inference about 4× faster than on the CPU.** The network itself took 7.4 ms on the NPU and 28.4 ms on ONNX Runtime's CPU path, for the same model and image. End to end, a frame took 7.75–7.78 ms against 32.1 ms.
+- **Lighter to install and run.** Resident memory was 193 MB against AMD's 305–306 MB (37% less), and the runtime install is about 318 MB against 4.7 GB (93% smaller).
 - **Same answers.** On the reference image both stacks find the same five objects, and their boxes overlap 97% on average (mean IoU 0.968).
 - **A working app included.** `python live_ignition.py` opens your webcam with boxes, labels, confidence scores and a live latency readout.
 
 ## Ignition vs AMD's Ryzen AI stack
 
-The same model (`yolov8n_cut_xint8.onnx`, AMD Quark XINT8) ran on the same image (`examples/assets/bus.jpg`) on a Ryzen 7 8700G. Each run had 50 warm-up and 500 timed frames. Runs alternated AMD, Ignition, AMD, Ignition, with the NPU checked idle before each, and both runs are shown in every cell.
+The same model (`yolov8n_cut_xint8.onnx`, AMD Quark XINT8) ran on the same image (`examples/assets/bus.jpg`) on a Ryzen 7 8700G. Each run had 50 warm-up and 500 timed frames. Runs alternated AMD, Ignition, AMD, Ignition, with the NPU checked idle before each, and both runs are shown in every cell. Ignition ran on ignite-xdna `5688f6d`.
 
 | | **Ignition** | **AMD Ryzen AI Software 1.7.1**<br/>ONNX Runtime + Vitis AI EP |
 |---|---|---|
-| **End-to-end latency, mean** | **8.09 / 8.27 ms** | 11.13 / 11.09 ms |
-| End-to-end latency, 95th percentile | **8.44 / 8.56 ms** | 11.85 / 11.85 ms |
-| ↳ image preparation (letterbox, quantize) | **0.34 / 0.43 ms**, native code into the NPU's buffer | 2.19 / 2.19 ms |
-| ↳ NPU | 7.48 / 7.53 ms | **6.68 / 6.66 ms** |
-| ↳ box decode and NMS | **0.27 / 0.30 ms** | 2.26 / 2.24 ms |
-| **Process memory (RSS)** | **192 MB** | 306 / 308 MB |
+| **End-to-end latency, mean** | **7.78 / 7.75 ms** | 10.37 / 10.33 ms |
+| End-to-end latency, 95th percentile | **8.02 / 7.96 ms** | 10.93 / 10.98 ms |
+| ↳ image preparation (letterbox, quantize) | **0.31 / 0.31 ms**, native code into the NPU's buffer | 1.72 / 1.73 ms |
+| ↳ NPU | 7.43 / 7.41 ms | **6.71 / 6.70 ms** |
+| ↳ box decode and NMS | **0.033 / 0.031 ms**, native code | 1.94 / 1.90 ms |
+| **Process memory (RSS)** | **192.7 / 192.5 MB** | 305.4 / 306.3 MB |
 | **Runtime install on disk** | **≈318 MB** | ≈4,704 MB |
 | Detections on `bus.jpg` | 4 people, 1 bus | the same 5 objects (box IoU 0.93–0.99) |
 | Where the network runs | all 66 layers on the NPU | 922 of 929 graph nodes on the NPU; 7 quantize/dequantize nodes on the CPU |
@@ -45,7 +45,7 @@ The same model (`yolov8n_cut_xint8.onnx`, AMD Quark XINT8) ran on the same image
 
 **What the comparison does and does not show:**
 - **Where Ignition's lead comes from.** It is entirely in host-side code. AMD's runtime executes the network and leaves image preparation and box decoding to your application, so the AMD column uses Ignition's reference numpy versions of those steps. Ignition ships them as native code. Hand-written native pre- and post-processing on AMD's stack would narrow the gap.
-- **Where AMD is ahead.** AMD's NPU stage itself is about 0.8 ms faster than Ignition's. AMD's stack also runs a much wider range of models, and its current release targets newer NPUs.
+- **Where AMD is ahead.** AMD's NPU stage itself is about 0.7 ms faster than Ignition's. AMD's stack also runs a much wider range of models, and its current release targets newer NPUs.
 - **What the disk figures count.** AMD's covers the Ryzen AI 1.7.1 install (4,072 MB), its ONNX Runtime with the Vitis AI EP (615 MB), `voe` (3 MB) and the compile cache (14 MB). Ignition's covers the XRT SDK with `pyxrt` (262 MB), ONNX Runtime for the CPU fallback (44 MB), ignite-xdna (3 MB), the `.ignite` container (8 MB) and Ignition itself (66 KB). Neither counts Python, numpy, OpenCV or the NPU driver. Building a container needs the mlir-aie toolchain, which is not counted.
 - **Why the AMD column uses 1.7.1.** In this project's testing, Ryzen AI Software 1.8.0 installed without the Phoenix/Hawk Point xclbin that its own documentation calls for, and rejected the driver's XDNA1 xclbins, so NPU inference on these chips stays on 1.7.1. That looks like a packaging bug, reported upstream as [amd/RyzenAI-SW#400](https://github.com/amd/RyzenAI-SW/issues/400) ([ignite-xdna decision record](https://github.com/jdominick05/ignite-xdna/blob/main/docs/DECISIONS.md)).
 
@@ -90,7 +90,7 @@ For `.onnx` models on the CPU only:
 pip install ./ignition_ai-0.3.1-py3-none-any.whl
 ```
 
-The wheels carry the Python API and the `ignition` command. The webcam app `live_ignition.py` lives in the repository, not the wheel, and the container is still built in an ignite-xdna checkout. v0.3.1 predates the backend and camera changes listed in [TODO.md](TODO.md)'s completed work.
+The wheels carry the Python API and the `ignition` command. The webcam app `live_ignition.py` lives in the repository, not the wheel, and the container is still built in an ignite-xdna checkout. v0.3.1 predates the backend, camera and native-decode changes listed in [TODO.md](TODO.md)'s completed work.
 
 **From source**, which the steps below use:
 
@@ -119,10 +119,12 @@ python live_ignition.py --headless --frames 300
 This command's output on the test machine (lit room, webcam 0):
 
 ```text
-[summary] G2G mean 7.887 ms | P50 7.846 | P95 8.189 | P99 8.389 | max 8.654 | over the last 300 timed frames; cold first frame 11.21 ms
-[summary] stage means (ms): preprocess 0.150 | NPU forward 7.451 (dispatch 7.212, readback 0.239) | decode+NMS 0.278
-[summary] boxes from NPU heads on 300/300 timed frames | 5.43 detections per frame
-[summary] RSS 211.1 MB at the first timed frame, 211.0 MB at the end (-0.18 MB over 300 frames)
+[summary] stop: frame limit | 310 frames processed (10 warm-up, 300 timed) | 70 distinct source frames | camera 0 via DSHOW 640x480
+[summary] camera: 71 frames in 2.4 s = 29.78 fps read, 0 repeated the previous frame, 29.78 distinct fps
+[summary] G2G mean 7.485 ms | P50 7.483 | P95 7.637 | P99 7.794 | max 7.942 | over the last 300 timed frames; cold first frame 11.35 ms
+[summary] stage means (ms): preprocess 0.133 | NPU forward 7.317 (dispatch 7.122, readback 0.195) | decode+NMS 0.030
+[summary] boxes from NPU heads on 300/300 timed frames | 4.62 detections per frame
+[summary] RSS 211.7 MB at the first timed frame, 211.7 MB at the end (+0.00 MB over 300 frames)
 ```
 
 More ways to run it:
@@ -168,12 +170,12 @@ ignition detect ../ignite-xdna/build/yolov8n_full.ignite --input examples/assets
 ignition detect ../ignite-xdna/build/yolov8n_full.ignite --input examples/assets/bus.jpg --stream --benchmark --frames 100
 ```
 
-On the test machine, the 100-frame benchmark sustained 123.47 frames per second with a median of 7.98 ms.
+On the test machine, the 100-frame benchmark sustained 128.78 frames per second with a median of 7.70 ms.
 
 ## Performance
 
 All figures come from YOLOv8n on NPU Device 0 of a Ryzen 7 8700G:
-- **Setup:** Windows 11, ignite-xdna `v0.1.0-phoenix-npu` with `build/yolov8n_full.ignite`, webcam 0 through DirectShow at 640×480, 10 warm-up frames per run.
+- **Setup:** Windows 11, `build/yolov8n_full.ignite`, webcam 0 through DirectShow at 640×480, 10 warm-up frames per run unless the command sets `--warmup`. Rows with a commit ran ignite-xdna `v0.1.0-phoenix-npu`, which decodes boxes in numpy and runs NMS through OpenCV; *re-check* rows ran ignite-xdna `5688f6d`, which does both in one native C pass.
 - **Records:** each row names the commit whose message records the run. *Re-check* rows were measured on 2026-09-14 and are recorded in the commit that added them to this README.
 
 | `live_ignition.py` run | Scene | Timed frames | Objects / frame | Mean | 99th pct | Record |
@@ -181,15 +183,18 @@ All figures come from YOLOv8n on NPU Device 0 of a Ryzen 7 8700G:
 | `--headless --frames 300` | webcam, dark room | 300 | 0 | 7.58 ms | 7.91 ms | `ee66fbd` |
 | `--headless --frames 300` | webcam, lit room | 300 | 5.44 | 7.82 ms | 8.18 ms | `8ffa482` |
 | `--headless --frames 300` | webcam, lit room | 300 | 5.27 | 7.87 ms | 8.58 ms | `8ffa482` |
-| `--headless --frames 300` | webcam, lit room | 300 | 5.43 | 7.89 ms | 8.39 ms | re-check |
+| `--headless --frames 300` | webcam, lit room | 300 | 5.43 | 7.89 ms | 8.39 ms | `0f374e5` |
+| `--headless --frames 300` | webcam, lit room | 300 | 4.62 | 7.49 ms | 7.79 ms | re-check |
 | `--headless --frames 500` | webcam, lit room | 500 | 5.90 | 8.02 ms | 8.55 ms | `8ffa482` |
 | `--headless --frames 300 --fresh` | webcam, every frame new | 300 | 5.00 | 8.03 ms | 8.51 ms | `8ffa482` |
 | window, closed with q | webcam, lit room | 714 | 5.74 | 7.98 ms | 8.52 ms | `8ffa482` |
 | `--source` a 640×480 crop of `bus.jpg`, `--headless --frames 500` | still image | 500 | 4.00 | 7.86 ms | 8.39 ms | `ee66fbd` |
-| `--source examples/assets/bus.jpg --headless --frames 300` | still image, 810×1080 | 300 | 5.00 | 8.06 ms | 8.67 ms | re-check |
+| `--source examples/assets/bus.jpg --headless --frames 300` | still image, 810×1080 | 300 | 5.00 | 8.06 ms | 8.67 ms | `0f374e5` |
+| `--source examples/assets/bus.jpg --headless --warmup 50 --frames 500` | still image, 810×1080 | 500 | 5.00 | 7.78 ms | 8.28 ms | re-check |
+| `--source examples/assets/bus.jpg --headless --warmup 50 --frames 500` | still image, 810×1080 | 500 | 5.00 | 7.75 ms | 8.10 ms | re-check |
 
-- **Frame rate:** Ignition's processing loop ran at 122 to 129 frames per second, so the camera sets the live rate, and the camera's auto exposure sets that. The test webcam, a Logitech C920, delivered 30 distinct frames per second in a bright room and 15 in a dim one, whatever rate or pixel format was requested. In the dim room `--exposure-priority off` held 30, with 2.43 detections per frame against 5.55–6.06 at 15. Media Foundation reads at 30 fps partly by repeating frames, so the `[summary] camera:` line counts the distinct ones. With `--fresh`, each new frame became detections 8.10 ms after it arrived.
-- **Busy scenes:** with 5–6 objects in view, decoding and NMS take 0.25–0.33 ms, against 0.05 ms on an empty scene.
+- **Frame rate:** Ignition's processing loop ran at 122 to 134 frames per second, so the camera sets the live rate, and the camera's auto exposure sets that. The test webcam, a Logitech C920, delivered 30 distinct frames per second in a bright room and 15 in a dim one, whatever rate or pixel format was requested. In the dim room `--exposure-priority off` held 30, with 2.43 detections per frame against 5.55–6.06 at 15. Media Foundation reads at 30 fps partly by repeating frames, so the `[summary] camera:` line counts the distinct ones. With `--fresh`, each new frame became detections 8.10 ms after it arrived.
+- **Decode and NMS:** in native code they took 0.030 ms with 4.62 objects per frame on the webcam and 0.031–0.033 ms with 5 on `bus.jpg`. The numpy and OpenCV version behind the rows with a commit took 0.25–0.33 ms with 5–6 objects in view and 0.05 ms on an empty scene.
 - **Long runs:** resident memory did not grow: −1.12 MB over 500 webcam frames in a lit room, −1.15 MB over 500 in a dark one, +0.02 MB over 500 frames of a still image.
 - **Clean exit:** every run exited cleanly and released the NPU; afterwards `xrt-smi` reported no hardware contexts running.
 
@@ -211,12 +216,12 @@ Latency is measured glass to glass: from the moment the loop takes a frame to th
 
 | Stage (native path) | What happens | Mean per frame |
 |---|---|---:|
-| Ingress | One native C pass (OpenMP) letterboxes, resizes and quantizes the frame straight into the NPU's mapped input buffer | 0.15 ms |
-| NPU dispatch | One run of ignite-xdna's graph-engine program computes all 66 layers on the 16 AIE2 cores | 7.21 ms |
-| Head readback | The P3, P4 and P5 box and class tensors are read from the output buffer | 0.24 ms |
-| Decode and NMS | DFL box decode and per-class non-maximum suppression on the host | 0.28 ms |
+| Ingress | One native C pass (OpenMP) letterboxes, resizes and quantizes the frame straight into the NPU's mapped input buffer | 0.133 ms |
+| NPU dispatch | One run of ignite-xdna's graph-engine program computes all 66 layers on the 16 AIE2 cores | 7.122 ms |
+| Head readback | The P3, P4 and P5 box and class tensors are read from the output buffer | 0.195 ms |
+| Decode and NMS | One native C pass decodes DFL boxes for the anchors that clear the confidence threshold and runs per-class non-maximum suppression on the host | 0.030 ms |
 
-These stage times come from the webcam re-check above: 640×480 frames with 5.43 objects per frame. A larger source costs more at ingress; the 810×1080 `bus.jpg` in the AMD comparison took 0.34–0.43 ms.
+These stage times come from the webcam re-check above: 640×480 frames with 4.62 objects per frame. A larger source costs more at ingress; the 810×1080 `bus.jpg` in the AMD comparison took 0.31 ms.
 - **What the NPU time is spent on:** activations move between host memory and the NPU between layers, so most of the dispatch is data movement. A copy of the container with every weight operation switched off still took 5.37 ms of a 7.39 ms dispatch (ignite-xdna `results/model_zoo/dispatch_floor_yolov8n_full.json`).
 - **The CPU fallback:** an `.onnx` model runs the same steps on ONNX Runtime's CPU execution provider instead.
 - **The camera:** a capture thread (`ThreadedCamera`) owns the webcam so sensor I/O never stalls inference. It tries DirectShow, then Media Foundation, abandons a backend that does not open within `--open-timeout`, and skips empty frames. It counts the frames it reads and the ones that repeat the previous frame. q, ESC, closing the window, Ctrl+C and Ctrl+Break all release the camera and the NPU.
