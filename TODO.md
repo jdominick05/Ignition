@@ -14,11 +14,11 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   frame, resident memory −1.15 to +0.02 MB over 500 frames, and `bus.jpg` boxes matching ONNX Runtime (mIoU
   0.977). Every run is in the [README](README.md#performance).
 - [x] **CLI on `.ignite`** (`ee66fbd`): `ignition detect`, including `--stream --benchmark`.
-- [x] **Consumer README** (`13157f8`, `6100486`): same-sitting comparison with AMD's stack and a compatibility
+- [x] **Consumer README** (`d42d33e`, `e3a6fcf`): same-sitting comparison with AMD's stack and a compatibility
   matrix.
-- [x] **pip install** (`60a7be1`, ignite-xdna `389f0a7`): Ignition's wheel and sdist install on their own; the
+- [x] **pip install** (`d6da435`, ignite-xdna `e73d4d8`): Ignition's wheel and sdist install on their own; the
   `npu` extra with ignite-xdna's wheel adds the NPU path.
-- [x] **v0.3.1 release** (tag at `ea5f86e`): both wheels, the sdist and SHA-256 sums on GitHub and GitLab, with
+- [x] **v0.3.1 release** (tag at `7d65d06`): both wheels, the sdist and SHA-256 sums on GitHub and GitLab, with
   [notes](docs/releases/v0.3.1.md); every file was downloaded back from both hosts and matched the sums.
 
 ## Active
@@ -53,9 +53,9 @@ decode, then `cv2.dnn.NMSBoxesBatched` over lists built with `.tolist()`.
 
 Two unlanded branches hold this work, and neither fast-forwards onto its `main` any more:
 
-- **ignite-xdna `worktree-model-zoo`** (`d828678`, `6e704ce`, `ffbc77e`, forked from `397da63`) compiles
+- **ignite-xdna `worktree-model-zoo`** (`91d0d7e`, `939a4f2`, `a356b30`, forked from `684e9ed`) compiles
   YOLOv8s and SESR M7 to `.ignite` and runs them on Device 0.
-- **Ignition `model-zoo`** (`8a1248a`, forked from `6100486`) makes `live_ignition.py` task-aware (`--task`,
+- **Ignition `model-zoo`** (`3cf2c49`, forked from `e3a6fcf`) makes `live_ignition.py` task-aware (`--task`,
   `--json`), with classification and super-resolution pipelines.
 
 ignite-xdna's `tools/model_zoo_bench.py` drives Ignition for the suites. Measured 2026-09-14, logs in
@@ -107,7 +107,7 @@ Only Phoenix on Windows 11 with Python 3.13 is verified ([README](README.md#comp
 
 ### 7. NPU dispatch time (ignite-xdna)
 
-AMD's NPU stage is about 0.8 ms faster than Ignition's on the same model and image (`13157f8`). Most of
+AMD's NPU stage is about 0.8 ms faster than Ignition's on the same model and image (`d42d33e`). Most of
 Ignition's dispatch is activations moving between host memory and the NPU: 5.37 ms of a 7.39 ms dispatch with
 every weight operation switched off (ignite-xdna `results/model_zoo/dispatch_floor_yolov8n_full.json`).
 
@@ -117,8 +117,8 @@ every weight operation switched off (ignite-xdna `results/model_zoo/dispatch_flo
 
 ## Needs a decision: duplicated history on `main`
 
-`main` holds two copies of the same 11 commits (`a7efb00` … `965579d` and `e08f23c` … `5465db7`), joined by
-`971d540` (`git merge -s ours --allow-unrelated-histories`); tags `v0.1.0` and `v0.2.0` point into the second.
+`main` holds two copies of the same 11 commits (`a7efb00` … `965579d` and `e08f23c` … `c16ceee`), joined by
+`10f22f4` (`git merge -s ours --allow-unrelated-histories`); tags `v0.1.0` and `v0.2.0` point into the second.
 Removing them means rewriting `main` and both tags on both remotes, a force-push this workflow does not allow,
 so they stay unless the maintainer decides otherwise. Rebasing local `main` alone would only make it diverge
 from both remotes.
