@@ -61,7 +61,7 @@ The same model (`yolov8n_cut_xint8.onnx`, AMD Quark XINT8) ran on the same image
 | **NPU driver and XRT** | ✅ Verified | NPU driver 32.0.20101.3760, firmware 1.5.5.391, XRT 2.21.0 |
 | **Python** | ✅ 3.10–3.13 (CPU), 3.13 (NPU) | The CPU path installs and runs on 3.10, 3.11, 3.12 and 3.13. The NPU path needs the Python the XRT SDK's `pyxrt` was built for, 3.13 with XRT 2.21.0; on 3.12 it stops at `DLL load failed while importing pyxrt` |
 | **YOLOv8n detection on the NPU** | ✅ Verified | 640×640 input, AMD Quark XINT8, compiled to `build/yolov8n_full.ignite` by ignite-xdna |
-| **Other models on the NPU** | ⚠️ In development | YOLOv8s and SESR M7 (super-resolution) compile and run on the NPU in an ignite-xdna development branch; not released |
+| **Other models on the NPU** | ⚠️ In development | YOLOv8s and SESR M7 (super-resolution) compile and run on the NPU with ignite-xdna's `main`; not in a release of either project, and Ignition's task-aware `live_ignition.py` for them is still on a branch |
 | **Other ONNX models** | ✅ CPU only | ONNX Runtime's CPU execution provider |
 | **Webcams** | ✅ Verified | USB webcams through DirectShow, then Media Foundation; tested at 640×480 |
 | **Video files and images** | ✅ Verified | Anything OpenCV opens, letterboxed to 640×640; tested with 640×480 and 810×1080 frames |
