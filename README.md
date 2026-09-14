@@ -1,238 +1,198 @@
 # Ignition
 
-**High-Performance Ergonomic Inference Engine for AMD Ryzen™ AI XDNA1 NPUs**
+**YOLOv8n object detection on the AMD Ryzen AI Phoenix NPU (XDNA1, AIE2), with ONNX Runtime on the CPU as the fallback.**
 
-Ignition is a production-grade inference engine and SDK purpose-built for AMD Ryzen™ AI NPUs (Phoenix / Hawk Point, XDNA1 AIE2). By bypassing heavyweight driver stacks and directly orchestrating physical AIE2 compute cores and on-chip MemTile L2 SRAM, Ignition achieves **sub-100 microsecond** multi-layer execution latencies with **zero intermediate host DDR roundtrips**.
+![NPU: AMD Phoenix XDNA1 (AIE2)](https://img.shields.io/badge/NPU-AMD%20Phoenix%20XDNA1%20%28AIE2%29-ed1c24)
+![YOLOv8n G2G: 7.8 ms mean](https://img.shields.io/badge/YOLOv8n%20G2G-7.8%20ms%20mean-brightgreen)
+![Silicon: verified on NPU Device 0](https://img.shields.io/badge/silicon-verified%20on%20NPU%20Device%200-blue)
+![CPU fallback: ONNX Runtime](https://img.shields.io/badge/CPU%20fallback-ONNX%20Runtime-lightgrey)
+![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)
 
----
+Give Ignition a bare-metal `.ignite` container compiled by [ignite-xdna](https://github.com/jdominick05/ignite-xdna) and the whole YOLOv8n network runs on the NPU. Each camera frame takes one NPU dispatch, and boxes are decoded from the detect heads the NPU computes; ONNX Runtime is never called. On a Ryzen 7 8700G, a live 640×480 webcam frame with 5 to 6 objects goes from memory to detections in 7.82–7.89 ms on average over 300-frame runs. An `.onnx` model runs on ONNX Runtime's CPU execution provider instead. On `bus.jpg` the same network takes 8.06 ms per frame from an `.ignite` container on the NPU and 38.82 ms as `.onnx` on the CPU.
 
-## Key Highlights
+## Status
 
-- ⚡ **Sub-100 μs Multi-Layer Inference**: Sustains up to **11,675 inferences/second** on physical Phoenix silicon (`Ryzen 7 8700G [003d:00:01.1]`).
-- 🔄 **Zero Host DDR Bounce**: Multi-pass L2 MemTile activation ping-ponging keeps intermediate feature maps strictly on-chip across consecutive layers, completely eliminating PCIe/DDR power and latency penalties.
-- 📦 **4,500× Smaller Artifacts**: Compact transaction binaries (~10 KB) replace monolithic 45+ MB compiled `.xmodel` blobs.
-- 🎯 **Bit-Exact Parity**: Direct hardware SRS (Shift-Round-Saturate) alignment guaranteeing $\le 1$ LSB numeric parity vs floating-point reference baselines.
-- 🛠️ **Ergonomic SDK & CLI**: High-level `ignition.compile()` API with automatic ONNX graph partitioning, stationary weight packing, and CPU fallback.
+- **NPU path:** `.ignite` containers run on NPU Device 0 `[003d:00:01.1]`. All 66 YOLOv8n layers (63 convolutions and the 3 SPPF max-pools) run on the 16 AIE2 cores.
+- **CPU fallback:** `.onnx` models run on ONNX Runtime (`CPUExecutionProvider`).
+- **Verified on:** AMD Ryzen 7 8700G with its Phoenix NPU, Windows 11, XRT through `pyxrt`, ignite-xdna `v0.1.0-phoenix-npu` (`397da63`) with the container `build/yolov8n_full.ignite`.
+- **Live latency:** 7.82–7.89 ms mean glass-to-glass with 5–6 objects per frame, and 7.58 ms on an empty scene ([Live performance](#live-performance)).
+- **Open work:** [TODO.md](TODO.md).
 
----
+## How a frame runs
 
-## Performance Comparison
+```mermaid
+flowchart LR
+    SRC["webcam, video or image<br/>ThreadedCamera"] --> P["YOLOPipeline"]
+    P -- ".ignite" --> ING["AVX2 ingress into the<br/>mapped input buffer"]
+    ING --> NPU["NPU Device 0<br/>66 layers on 16 AIE2 cores"]
+    NPU --> RB["P3/P4/P5 head readback"]
+    P -- ".onnx" --> ORT["letterbox and<br/>ONNX Runtime on the CPU"]
+    RB --> POST["DFL decode and<br/>per-class NMS"]
+    ORT --> POST
+    POST --> DET["detections"]
+```
 
-Measurements captured on physical AMD Phoenix NPU silicon (`AMD Ryzen 7 8700G APU [003d:00:01.1]`, 16 AIE2 cores @ 1.80 GHz):
+Glass-to-glass (G2G) is timed from the moment the loop takes a frame to the moment its detections exist. It covers ingress, NPU dispatch, head readback, decode and NMS. Drawing and display come after it.
 
-### 1. Multi-Layer Conv Latency & Throughput
+### Native XDNA path (`.ignite`)
 
-| Metric | Stock Vitis AI ONNX Runtime EP | Ignition (AIE2 Direct Execution) | Advantage |
-|---|---|---|---|
-| **Driver Invocation Tax** | ~617 μs (per dispatch) | **~75 μs** (amortized once per pass) | **8.2× lower overhead** |
-| **Intermediate DDR Traffic** | External DRAM bounce per op | **0 Bytes** (On-Chip MemTile L2 Ping-Pong) | **Zero DDR bandwidth consumed** |
-| **Pipelined Latency (2-Layer)** | 1,200+ μs | **164.56 μs** | **7.3× lower latency** |
-| **Pipelined Latency (4-Layer)** | 2,400+ μs | **168.37 μs** | **14.2× lower latency** |
-| **Pipelined Throughput** | ~400 – 800 FPS | **5,939 – 6,107 FPS** | **Up to 15× higher FPS** |
-| **Binary Artifact Footprint** | 45+ MB (`.xmodel`) | **10.5 KB** (`.bin` transaction stream) | **4,500× smaller footprint** |
-| **Memory Allocation** | Dynamic per-layer allocation | Zero-copy unified ring buffer (`PyXRT BO`) | Deterministic execution |
+`YOLOPipeline` recognises an ignite-xdna container by its `.ignite` suffix or its `IGNT` header and hands it to ignite-xdna's `YoloPipeline` on NPU `device_id` (default 0). It drops the ONNX Runtime comparison session that ignite-xdna opens, so no frame can reach ONNX Runtime. The pipeline is a context manager: `close()` releases the NPU hardware context, and a finalizer does so if `close()` is never called.
 
-### 2. Full-Pipeline YOLOv8n End-to-End Silicon Benchmark
+| Stage | Where it runs | Mean per frame |
+|---|---|---:|
+| **Ingress:** one fused AVX2 C pass letterboxes, resizes and quantizes the BGR frame straight into the input plane of the mapped XRT buffer object; no int8 tensor is built on the host | ignite-xdna `pipelines/preprocess.py` | 0.15 ms |
+| **NPU dispatch:** one run of the graph-engine program on the 16 cores; its instruction stream moves weight packets and activation tiles between host memory and the cores for all 66 layers | NPU Device 0 | 7.21 ms |
+| **Head readback:** the P3, P4 and P5 box and class tensors, read from the output buffer | ignite-xdna `runtime/graph_session.py` | 0.24 ms |
+| **Decode and NMS:** DFL box decode and per-class NMS on the host | ignite-xdna `YoloDecoder.postprocess` | 0.28 ms (0.05 ms on an empty scene) |
 
-End-to-end 640×640 INT8 QDQ YOLOv8n object detection pipeline benchmarked across 500 steady-state iterations on physical Phoenix silicon (`Ryzen 7 8700G [003d:00:01.1]`):
+The stage means come from the 2026-09-14 re-check run with 5.43 objects per frame and 7.89 ms G2G. Activations return to host memory between layers. A copy of this container with every weight op switched off still took 5.37 ms against the real container's 7.39 ms (300 dispatches each; ignite-xdna branch `worktree-model-zoo`, `results/model_zoo/dispatch_floor_yolov8n_full.json`). Most of the dispatch is therefore data movement rather than compute.
 
-| Metric | AMD ONNX Runtime Vitis AI EP | Ignition (Pipeline A: Sync) | Ignition (Pipeline B: 3-Stage Async) | Advantage / Feature |
-|---|:---:|:---:|:---:|---|
-| **Sustained Throughput** | **96.47 FPS** | **23.06 FPS** | **27.39 FPS** | +18.8% streaming throughput via concurrent stages |
-| **Mean End-to-End Latency** | 10.36 ms | 43.37 ms | 72.75 ms | Fully overlapped concurrent queue pipeline |
-| **Preprocess Time (Mean)** | 1.74 ms | 1.88 ms | 1.90 ms | Zero-copy OpenCV letterbox + quant scaling |
-| **NPU Backbone Time (Mean)**| **6.61 ms** | **34.07 ms** | **36.48 ms** | Direct physical AIE2 silicon execution |
-| **Postprocess Time (Mean)** | 2.01 ms | 2.05 ms | 3.07 ms | Vectorized DFL decode + batched per-class NMS |
-| **Numerical Parity (mIoU)** | Baseline | **0.9766** | **0.9766** | **100% class match, mIoU $\ge 0.95$ passed** |
-| **Peak Process RSS** | 305.3 MB | **230.7 MB** | **255.2 MB** | **Up to 24.4% lower RAM footprint** |
-| **Runtime Package Footprint**| 4,703.5 MB | **262.4 MB** | **262.4 MB** | **94.4% reduction (65 KB wheel = 72,000× smaller)** |
+A container without detect heads, such as the legacy `build/yolov8n.ignite`, still loads. Ignition warns that its frames will have no detections.
 
----
+### ONNX Runtime CPU fallback (`.onnx`)
+
+Any other model file loads into ONNX Runtime with the CPU execution provider. The frame is letterboxed with OpenCV and numpy, the network runs on ONNX Runtime, and boxes go through the same decode and NMS. For `yolov8n_cut_xint8.onnx` on `bus.jpg` that is 1.96 ms of preprocessing, 34.70 ms of ONNX Runtime and 2.15 ms of decode and NMS: 38.82 ms mean G2G over 300 frames. It finds the same 5 objects as the NPU path, and the two paths' boxes match with a class-matched mIoU of 0.977.
+
+`live_ignition.py` opens `.onnx` models on the CPU backend. `ignition.compile` and `ignition detect` default to `backend="xdna1"`, which for an `.onnx` YOLO model also runs an unused ignite-xdna layer-backend call on every frame ([TODO.md](TODO.md#4-honest-backends)). Pass `--backend cpu` for the plain CPU path.
+
+### Camera capture: `ThreadedCamera`
+
+- **Capture thread:** a thread owns `cv2.VideoCapture` and absorbs the 33–66 ms each sensor read blocks for. It publishes every frame with a sequence number and an arrival time. The inference loop takes the newest frame without waiting; with `--fresh` it waits for the next new one.
+- **Backend negotiation:** DirectShow is tried first, then Media Foundation, then OpenCV's default backend. Each open runs in a helper thread and is abandoned after `--open-timeout` (8 s by default), because DirectShow can block forever on an IR sensor. A backend counts as open only once it has delivered a non-empty first frame.
+- **Empty frames:** empty or failed reads are counted and skipped, never passed to the pipeline.
+- **Media Foundation start-up:** `OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS=0` is set before OpenCV loads; without it, a Media Foundation open can take about 90 s.
+- **Shutdown:** q, ESC, closing the window, Ctrl+C and Ctrl+Break all release the camera, the window and the NPU context, then exit 0.
+
+## Live performance
+
+YOLOv8n on NPU Device 0 of a Ryzen 7 8700G:
+- **Setup:** Windows 11, the `mlir-aie-iron` conda environment, ignite-xdna `397da63` with `build/yolov8n_full.ignite`, webcam 0 through DirectShow at 640×480, 10 warm-up frames per run.
+- **Records:** Ignition does not track benchmark logs, so the Record column names the commit whose message carries the run. Rows marked *re-check* were measured on 2026-09-14 for this README, and the commit that updated the README records their logs.
+
+| `live_ignition.py` run | Scene | Timed frames | Objects / frame | G2G mean | G2G P99 | Record |
+|---|---|---:|---:|---:|---:|---|
+| `--headless --frames 300` | webcam, dark room | 300 | 0 | 7.58 ms | 7.91 ms | `ee66fbd` |
+| `--headless --frames 300` | webcam, lit room | 300 | 5.44 | 7.82 ms | 8.18 ms | `8ffa482` |
+| `--headless --frames 300` | webcam, lit room | 300 | 5.27 | 7.87 ms | 8.58 ms | `8ffa482` |
+| `--headless --frames 300` | webcam, lit room | 300 | 5.43 | 7.89 ms | 8.39 ms | re-check |
+| `--headless --frames 500` | webcam, lit room | 500 | 5.90 | 8.02 ms | 8.55 ms | `8ffa482` |
+| `--headless --frames 300 --fresh` | webcam, every frame new | 300 | 5.00 | 8.03 ms | 8.51 ms | `8ffa482` |
+| window, closed with q | webcam, lit room | 714 | 5.74 | 7.98 ms | 8.52 ms | `8ffa482` |
+| `--source` a 640×480 crop of `bus.jpg`, `--headless --frames 500` | still image | 500 | 4.00 | 7.86 ms | 8.39 ms | `ee66fbd` |
+| `--source examples/assets/bus.jpg --headless --frames 300` | still image, 810×1080 | 300 | 5.00 | 8.06 ms | 8.67 ms | re-check |
+| the same with `--model …/yolov8n_cut_xint8.onnx` (CPU) | still image, 810×1080 | 300 | 5.00 | 38.82 ms | 46.49 ms | re-check |
+
+- **Stage times:** across these runs NPU dispatch took 7.14–7.26 ms and head readback 0.22–0.28 ms. Decode and NMS took 0.25–0.33 ms with objects in view and 0.05 ms on the empty scene.
+- **Throughput:** the headless loop re-runs the newest frame and reported 122 to 129 FPS. `ignition detect --stream --benchmark --frames 100` on `bus.jpg` sustained 123.47 FPS (median 7.98 ms). Live throughput is set by the camera: the webcam delivers 15 frames per second through DirectShow, so `--fresh` runs at 15 FPS, with 8.10 ms from camera arrival to detections ([TODO.md](TODO.md#1-camera-rate-30-fps-from-the-webcam)).
+- **Memory:** resident memory stayed flat: −1.12 MB over 500 lit webcam frames, −1.15 MB over 500 dark ones and +0.02 MB over 500 frames of a still image.
+- **Every run:** exit 0, no ONNX Runtime `run()` call on the `.ignite` path, and `xrt-smi` reporting no hardware contexts running afterwards.
+
+### Earlier measurements
+
+- **Vitis AI EP.** The 2026-09-12 comparison (`12e162a`) used a different harness on the same 640×640 letterboxed `bus.jpg`. AMD's ONNX Runtime Vitis AI execution provider measured 10.36 ms mean end-to-end over 500 iterations, 6.61 ms of it in the backbone. Ignition's figures in that comparison predate the `.ignite` path and measured the ONNX Runtime path.
+- **Layer backend.** `ignition.compile("model.onnx", backend="xdna1")` returns a `Model` on ignite-xdna's partitioner and MemTile multi-pass scheduler, using the `im2col_4d_16core.xclbin` bundled in `src/ignition/assets`. On 2026-09-12 it ran synthetic 1- to 4-layer Conv2D subgraphs, handing activations between layers in MemTile SRAM with no host copies. Each run took 163.75–168.37 µs, or 5,939–6,107 inferences per second ([log](https://github.com/jdominick05/ignite-xdna/blob/main/results/aie/hardware_multi_layer_scheduler.log)). These are subgraph figures, not whole-network latency.
 
 ## Quickstart
 
-### 1. Installation
+### Requirements
 
-Install Ignition and the low-level `ignite-xdna` kernel engine:
+- Windows 11 on an AMD Ryzen AI processor with a Phoenix (XDNA1) NPU and AMD's NPU driver. Verified on a Ryzen 7 8700G.
+- A Python environment where `pyxrt` imports. Verified with Python 3.13 in the `mlir-aie-iron` conda environment.
+- ignite-xdna checked out next to Ignition, with `build/yolov8n_full.ignite` compiled there by `ignite-compile --engine graph --output build/yolov8n_full.ignite`. The graph engine needs the mlir-aie IRON toolchain; see ignite-xdna's README.
+- Before timing anything, check that `xrt-smi examine -r aie-partitions` reports `No hardware contexts running`.
+
+### Install
 
 ```bash
-# Clone and install in editable mode
+git clone https://github.com/jdominick05/ignite-xdna.git
 git clone https://github.com/jdominick05/Ignition.git
+pip install -e ignite-xdna
+pip install -e Ignition
 cd Ignition
-pip install -e .
 ```
 
-### 2. Python API
+### Live camera: `live_ignition.py`
 
-Compile and execute an ONNX model on physical AIE2 silicon in just 5 lines:
-
-```python
-import numpy as np
-import ignition
-
-# 1. Compile ONNX model for physical AMD Phoenix AIE2 NPU
-model = ignition.compile("model.onnx", backend="xdna1")
-
-# 2. Run inference with automatic unswizzling and preprocessing
-input_tensor = np.zeros((1, 8, 32, 32), dtype=np.int8)
-output = model.predict(input_tensor)
-print(f"Output shape: {output.shape}")
-
-# 3. Profile sustained physical hardware throughput
-report = model.benchmark(iterations=500)
-print(f"Sustained Throughput: {report.fps:.1f} FPS | Mean Latency: {report.mean_us:.2f} μs")
-```
-
-### 3. Command-Line Interface (CLI)
-
-#### Probe Hardware Devices
 ```bash
-$ ignition devices
-================================================================================
-IGNITION HARDWARE ACCELERATOR PROBE
-================================================================================
-Device 0: AMD Ryzen 7 8700G (Phoenix) [003d:00:01.1]
-  Architecture:    XDNA1 AIE2 (16 Cores, 4 Columns x 4 Rows (Tiles 0..3, 2..5))
-  On-Chip SRAM:    2048 KB L2 MemTile SRAM
-  Tile Frequency:  1.80 GHz
-  Peak Compute:    14.75 INT8 TOPS
-  Status:          ONLINE (PyXRT ERT Ready)
+python live_ignition.py                                   # webcam 0 in a window: boxes, labels, scores, G2G HUD; q or ESC quits
+python live_ignition.py --headless --frames 300           # no window: G2G mean/P50/P95/P99, stage means, RSS drift
+python live_ignition.py --headless --frames 300 --fresh   # wait for each new camera frame (camera-paced)
+python live_ignition.py --model ../ignite-xdna/build/yolov8n_full.ignite --source 0
+python live_ignition.py --model ../ignite-xdna/build/yolov8n_full.ignite --source examples/assets/bus.jpg --headless --frames 300
+python live_ignition.py --model ../ignite-xdna/models/yolov8n_cut_xint8.onnx --source examples/assets/bus.jpg --headless --frames 300
 ```
 
-#### Run Model Inference
-```bash
-$ ignition run model.onnx --input sample.png --backend xdna1
-[*] Compiling model.onnx on backend: XDNA1...
-[*] Loading input data: sample.png
-[+] Inference successfully completed on physical silicon!
-    Output Tensor Shape: (1, 32, 32, 32)
-    Output Tensor Dtype: int8
+| Flag | Meaning |
+|---|---|
+| `--model` | An `.ignite` container (NPU) or `.onnx` model (ONNX Runtime CPU). The default is `../ignite-xdna/build/yolov8n_full.ignite`, falling back to `build/yolov8n.ignite`, which has no detect heads. |
+| `--source` | Webcam index (`0`, `1`, …), video file or image (default `0`). |
+| `--headless` | No window; prints a progress line every 100 frames. |
+| `--frames N` | Stop after N timed frames and print the summary (default 0: run until stopped). |
+| `--warmup N` | Untimed frames before the timed ones (default 10). |
+| `--fresh` | Wait for a new camera frame before each inference instead of reusing the newest one. |
+| `--conf`, `--iou` | Confidence and NMS IoU thresholds (defaults 0.25 and 0.45). |
+| `--open-timeout` | Seconds allowed for each camera backend to open (default 8). |
+
+Boxes come from the NPU's detect heads whenever the container carries them; nothing needs switching on. The re-check's `--headless --frames 300` run on the webcam ended with:
+
+```text
+[summary] stop: frame limit | 310 frames processed (10 warm-up, 300 timed) | 37 distinct source frames | camera 0 via DSHOW 640x480
+[summary] G2G mean 7.887 ms | P50 7.846 | P95 8.189 | P99 8.389 | max 8.654 | over the last 300 timed frames; cold first frame 11.21 ms
+[summary] stage means (ms): preprocess 0.150 | NPU forward 7.451 (dispatch 7.212, readback 0.239) | decode+NMS 0.278
+[summary] boxes from NPU heads on 300/300 timed frames | 5.43 detections per frame
+[summary] RSS 211.1 MB at the first timed frame, 211.0 MB at the end (-0.18 MB over 300 frames)
 ```
 
-#### Profile Sustained Latency
-```bash
-$ ignition benchmark model.onnx --backend xdna1 --iterations 500 --compare-cpu
-================================================================================
-IGNITION SUSTAINED HARDWARE BENCHMARK
-================================================================================
-Model:      model.onnx
-Backend:    XDNA1
-Iterations: 500 (Warmup: 20)
---------------------------------------------------------------------------------
-=== Benchmark Report (xdna1) ===
-  Iterations:          500
-  Mean Latency:        164.56 μs
-  Median Latency:      161.70 μs
-  Min Latency:         135.20 μs
-  P95 Latency:         191.44 μs
-  Sustained FPS:       6077.0 inferences/sec
-  Intermediate DDR:    0 Bytes
---------------------------------------------------------------------------------
-Executing baseline comparison against ONNX Runtime CPU...
-=== Benchmark Report (cpu) ===
-  Iterations:          500
-  Mean Latency:        1890.20 μs
-  Sustained FPS:       529.0 inferences/sec
-================================================================================
-Speedup vs ORT CPU: 11.49x
-================================================================================
-```
-
-### 4. Bare-Metal `.ignite` Containers and the Live Camera
-
-An `.ignite` container compiled by ignite-xdna runs the whole YOLOv8n network on the NPU. `YOLOPipeline` recognises it by its extension or its `IGNT` header and serves it through ignite-xdna's native runtime instead of ONNX Runtime: one NPU dispatch per frame, with boxes decoded from the NPU's detect heads. `.onnx` models keep the ONNX Runtime path.
+### Python API
 
 ```python
 import ignition
 
 with ignition.compile("../ignite-xdna/build/yolov8n_full.ignite", pipeline="yolo") as pipe:
     result = pipe.predict("examples/assets/bus.jpg")
-    print(result.summary())  # includes the NPU dispatch and head readback times
+    print(result.summary())  # detections plus preprocess, NPU dispatch, head readback and NMS times
 ```
 
-`live_ignition.py` runs the pipeline on a webcam, a video or an image. Run it in the `mlir-aie-iron` environment, where pyxrt loads:
+`pipe.predict` takes a path, a PIL image or a BGR numpy array. `pipe.stream(frames)` yields one result per frame of an iterable.
+
+### `ignition` CLI
 
 ```bash
-python live_ignition.py                           # webcam 0 in a window; q or ESC quits
-python live_ignition.py --headless --frames 300   # G2G mean, P50, P95, P99 and RSS drift
-python live_ignition.py --source clip.mp4 --model ../ignite-xdna/models/yolov8n_cut_xint8.onnx
+ignition devices                                                                                     # probe NPU Device 0 through pyxrt
+ignition detect ../ignite-xdna/build/yolov8n_full.ignite --input examples/assets/bus.jpg --output detections.jpg
+ignition detect ../ignite-xdna/build/yolov8n_full.ignite --input examples/assets/bus.jpg --stream --benchmark --frames 100
 ```
 
-The default model is ignite-xdna's graph-engine container `build/yolov8n_full.ignite`, falling back to `build/yolov8n.ignite`, which carries no detect heads and therefore draws no boxes. Glass-to-glass (G2G) is timed from the frame in memory to its detections; drawing and display come after it.
+- **`--stream` on an `.ignite` container:** runs one synchronous NPU dispatch per frame. The 3-stage asynchronous runner is used only for `.onnx` models.
+- **Other commands:** `ignition run` and `ignition benchmark` drive the layer backend on ONNX models; see `ignition --help`.
 
-Measured on a Ryzen 7 8700G (NPU Device 0) with a 640x480 webcam and 5 to 6 detected objects per frame: `--headless --frames 300` averaged 7.82 and 7.87 ms G2G in two runs (P99 8.18 and 8.58 ms), of which 7.14 to 7.19 ms is the NPU dispatch and 0.27 ms decode and NMS. A 500-frame run averaged 8.02 ms, and `--fresh` (every frame a new camera frame) 8.03 ms.
-
----
-
-## Architectural Overview
-
-```
-                         [ Host Memory (DDR) ]
-                                 │
-                   Arg 0 Ingress │  (Shim BD 0)
-                                 ▼
-                     ┌───────────────────────┐
-                     │  MemTile Row (Row 1)  │
-                     │  L2_BANK_0 / L2_BANK_1│ ◄─── Hardware Ping-Pong
-                     └───────────────────────┘      Lock 4 / Lock 5
-                       ▲                   │        (0 DDR bytes)
-      Gather Credit    │ S2MM         MM2S │ Scatter
-      Lock 2 (val = 4) │                   ▼
-                     ┌───────────────────────┐
-                     │   AIE2 Compute Grid   │
-                     │  16 Cores (Rows 2..5) │ ◄─── Stationary Weights
-                     │  Vector MACs + SRS    │      (3 - blk) * 8 reversal
-                     └───────────────────────┘
-                                 │
-                   Arg 1 Egress  │  (Shim BD 4)
-                                 ▼
-                         [ Host Memory (DDR) ]
-```
-
-### 1. Dynamic L2 MemTile Ping-Pong Scheduling
-Consecutive convolutional layers alternate feature map staging between MemTile `L2_BANK_0` (`0x40000`) and `L2_BANK_1` (`0x60000`) across `Tile(0..3, 1)`. Synchronization locks (Lock 4 ping, Lock 5 pong, Lock 2 core gather) arbitrate dataflow directly in hardware, executing multi-pass topologies without writing intermediate activations back to host RAM.
-
-### 2. Stationary Vector Weight Packing
-Weights are packed into the native AIE2 vector register alignment:
-$$\text{offset} = (3 - \text{blk}) \times 8 \quad (\text{for } 0 \le \text{blk} < 4)$$
-Pre-staged directly into the L1 SRAM of each AIE2 core tile during initialization, weights remain stationary across inferences, enabling sustained streaming inference rates exceeding 11,000 FPS.
-
-### 3. Split-Transaction Decoupling
-Execution is partitioned into a one-time setup binary (`init.bin`) and a lightweight frame binary (`exec.bin`):
-- `init.bin`: Powers on clock gates, resets tiles, establishes static interconnect routes, and initializes lock counters.
-- `exec.bin`: Consists purely of DMA buffer descriptor chains and channel queue pushes (`0x1D214 / 0x1D204`), terminating in a single `0x80 TXN_OPC_TCT` token.
-
----
-
-## Repository Structure
+## Repository layout
 
 ```
 Ignition/
-├── src/
-│   └── ignition/
-│       ├── __init__.py        # High-level compile(), devices(), Model exports
-│       ├── model.py           # Model lifecycle, preprocessing, and benchmark methods
-│       ├── devices.py         # Hardware discovery and topology inspection
-│       ├── backends/
-│       │   ├── base.py        # BaseBackend interface and BenchmarkReport
-│       │   ├── xdna1.py       # Production AMD Phoenix XDNA1 / AIE2 backend
-│       │   └── cpu.py         # Reference ONNX Runtime CPU backend
-│       ├── pipelines/
-│       │   ├── yolo.py        # YOLOv8 decode, NMS, visualizer; .onnx via ONNX Runtime, .ignite on the NPU
-│       │   └── streaming.py   # 3-stage async pipelined execution runner
-│       └── cli/
-│           └── main.py        # Click CLI (devices, run, benchmark, detect)
+├── live_ignition.py           # live webcam / video / image detection with G2G percentiles and RSS drift
+├── src/ignition/
+│   ├── __init__.py            # compile(), devices() and the public exports
+│   ├── pipelines/
+│   │   ├── yolo.py            # YOLOPipeline: .ignite on the NPU via ignite-xdna, .onnx on ONNX Runtime; decode, NMS, drawing
+│   │   └── streaming.py       # 3-stage asynchronous runner for .onnx models
+│   ├── backends/
+│   │   ├── xdna1.py           # layer backend: ignite-xdna InferenceSession on the bundled xclbin
+│   │   ├── cpu.py             # ONNX Runtime CPU backend
+│   │   └── base.py            # backend interface and BenchmarkReport
+│   ├── model.py               # Model: predict and benchmark on a backend
+│   ├── devices.py             # NPU discovery through pyxrt
+│   ├── assets/                # im2col_4d_16core.xclbin and layer transaction binaries
+│   └── cli/main.py            # ignition devices | run | benchmark | detect
 ├── examples/
-│   ├── quickstart.py          # 10-line runnable inference example
-│   └── yolo_vision_demo.py    # Physical silicon YOLOv8 streaming vision demo
-├── live_ignition.py           # Live webcam / video / image detection with G2G percentiles
-├── pyproject.toml             # Modern Setuptools / PEP 621 packaging
-├── LICENSE                    # GNU Affero General Public License v3.0 (AGPL-3.0)
-└── README.md
+│   ├── yolo_vision_demo.py    # single-image detection demo (--model, --image, --backend)
+│   ├── quickstart.py          # layer-backend Model example
+│   └── assets/bus.jpg
+├── TODO.md                    # completed milestones and open work
+├── pyproject.toml             # package ignition-ai 0.2.0, console script `ignition`
+└── LICENSE                    # GNU Affero General Public License v3.0 or later
 ```
-
----
 
 ## License
 
-Ignition is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE).
+Ignition is licensed under the [GNU Affero General Public License v3.0 or later](LICENSE).
