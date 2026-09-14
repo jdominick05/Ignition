@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -30,10 +30,14 @@ dependencies = [
     "pillow>=9.0.0",
     "opencv-python>=4.7.0",
     "click>=8.0.0",
-    "ignite-xdna>=0.2.0",
 ]
 
 [project.optional-dependencies]
+# The native .ignite path. ignite-xdna is not on PyPI: install its wheel from the
+# same release page (or `pip install -e` a checkout) alongside this extra.
+npu = [
+    "ignite-xdna>=0.2.0",
+]
 dev = [
     "pytest>=7.0.0",
     "black>=23.0.0",
