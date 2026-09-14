@@ -59,7 +59,7 @@ The same model (`yolov8n_cut_xint8.onnx`, AMD Quark XINT8) ran on the same image
 | **Windows 11** | ✅ Verified | Windows 11 Pro, build 26200.9445 |
 | **Linux** | ❌ Not supported | Ignition uses the Windows XRT stack |
 | **NPU driver and XRT** | ✅ Verified | NPU driver 32.0.20101.3760, firmware 1.5.5.391, XRT 2.21.0 |
-| **Python** | ✅ 3.13 verified | The package declares 3.10 or later; only 3.13 has been tested |
+| **Python** | ✅ 3.10–3.13 (CPU), 3.13 (NPU) | The CPU path installs and runs on 3.10, 3.11, 3.12 and 3.13. The NPU path needs the Python the XRT SDK's `pyxrt` was built for, 3.13 with XRT 2.21.0; on 3.12 it stops at `DLL load failed while importing pyxrt` |
 | **YOLOv8n detection on the NPU** | ✅ Verified | 640×640 input, AMD Quark XINT8, compiled to `build/yolov8n_full.ignite` by ignite-xdna |
 | **Other models on the NPU** | ⚠️ In development | YOLOv8s and SESR M7 (super-resolution) compile and run on the NPU in an ignite-xdna development branch; not released |
 | **Other ONNX models** | ✅ CPU only | ONNX Runtime's CPU execution provider |
@@ -73,7 +73,7 @@ The same model (`yolov8n_cut_xint8.onnx`, AMD Quark XINT8) ran on the same image
 ### What you need
 
 - **Hardware:** a Windows 11 PC with an AMD Phoenix NPU and AMD's NPU driver.
-- **Python:** an environment where `pyxrt` imports (tested: Python 3.13).
+- **Python:** the version the XRT SDK's `pyxrt` was built for, 3.13 with XRT 2.21.0; `pyxrt` does not load on others. The CPU path on its own runs on 3.10 to 3.13.
 - **Runtime and model:** [ignite-xdna](https://github.com/jdominick05/ignite-xdna) checked out next to Ignition, with the YOLOv8n container built there by `ignite-compile --engine graph --output build/yolov8n_full.ignite` (needs the mlir-aie IRON toolchain; see ignite-xdna's README).
 
 ### Install
