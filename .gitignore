@@ -33,6 +33,26 @@ ENV/
 *.swp
 *.swo
 
+# --- Local tooling configuration ----------------------------------------
+# Editor and assistant settings are specific to one developer's workflow and
+# are not part of the project. Extend this block before a new kind of
+# assistant file is ever staged, not after.
+.claude/
+CLAUDE.md
+.codex/
+CODEX.md
+.gemini/
+GEMINI.md
+.agy/
+.agents/
+AGENTS.md
+# Session handoff and scratch notes, whichever assistant wrote them.
+HANDOFF_*.md
+claude-handoff.md
+claude-handoff.*.md
+*handoff*.md
+.worktrees/
+
 # Development tools, benchmarks, and internal scripts
 scripts/
 benchmarks/
