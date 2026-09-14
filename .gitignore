@@ -52,6 +52,8 @@ claude-handoff.md
 claude-handoff.*.md
 *handoff*.md
 .worktrees/
+# File-sync folder marker (Syncthing).
+.stfolder/
 
 # Development tools, benchmarks, and internal scripts
 scripts/
