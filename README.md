@@ -21,7 +21,7 @@ Ignition runs YOLOv8n object detection on the NPU built into AMD Ryzen AI proces
 
 - **About 25% lower end-to-end latency than AMD's stack.** The same model and image took 7.75–7.78 ms per frame through Ignition and 10.33–10.37 ms through AMD's ONNX Runtime Vitis AI execution provider, measured back to back on the same machine.
 - **Inference about 4× faster than on the CPU.** The network itself took 7.4 ms on the NPU and 28.4 ms on ONNX Runtime's CPU path, for the same model and image. End to end, a frame took 7.75–7.78 ms against 32.1 ms.
-- **Lighter to install and run.** Resident memory was 193 MB against AMD's 305–306 MB (37% less), and the runtime install is about 318 MB against 4.7 GB (93% smaller).
+- **Lighter to install and run.** Resident memory was 192.5–192.7 MB against AMD's 305.4–306.3 MB (37% less), and the runtime install is about 318 MB against 4.7 GB (93% smaller).
 - **Same answers.** On the reference image both stacks find the same five objects, and their boxes overlap 97% on average (mean IoU 0.968).
 - **A working app included.** `python live_ignition.py` opens your webcam with boxes, labels, confidence scores and a live latency readout.
 
@@ -193,7 +193,7 @@ All figures come from YOLOv8n on NPU Device 0 of a Ryzen 7 8700G:
 | `--source examples/assets/bus.jpg --headless --warmup 50 --frames 500` | still image, 810×1080 | 500 | 5.00 | 7.78 ms | 8.28 ms | re-check |
 | `--source examples/assets/bus.jpg --headless --warmup 50 --frames 500` | still image, 810×1080 | 500 | 5.00 | 7.75 ms | 8.10 ms | re-check |
 
-- **Frame rate:** Ignition's processing loop ran at 122 to 134 frames per second, so the camera sets the live rate, and the camera's auto exposure sets that. The test webcam, a Logitech C920, delivered 30 distinct frames per second in a bright room and 15 in a dim one, whatever rate or pixel format was requested. In the dim room `--exposure-priority off` held 30, with 2.43 detections per frame against 5.55–6.06 at 15. Media Foundation reads at 30 fps partly by repeating frames, so the `[summary] camera:` line counts the distinct ones. With `--fresh`, each new frame became detections 8.10 ms after it arrived.
+- **Frame rate:** Ignition's processing loop ran at 122 to 129 frames per second with the numpy decode and 133 to 134 with the native one, so the camera sets the live rate, and the camera's auto exposure sets that. The test webcam, a Logitech C920, delivered 30 distinct frames per second in a bright room and 15 in a dim one, whatever rate or pixel format was requested. In the dim room `--exposure-priority off` held 30, with 2.43 detections per frame against 5.55–6.06 at 15. Media Foundation reads at 30 fps partly by repeating frames, so the `[summary] camera:` line counts the distinct ones. With `--fresh`, each new frame became detections 8.10 ms after it arrived.
 - **Decode and NMS:** in native code they took 0.030 ms with 4.62 objects per frame on the webcam and 0.031–0.033 ms with 5 on `bus.jpg`. The numpy and OpenCV version behind the rows with a commit took 0.25–0.33 ms with 5–6 objects in view and 0.05 ms on an empty scene.
 - **Long runs:** resident memory did not grow: −1.12 MB over 500 webcam frames in a lit room, −1.15 MB over 500 in a dark one, +0.02 MB over 500 frames of a still image.
 - **Clean exit:** every run exited cleanly and released the NPU; afterwards `xrt-smi` reported no hardware contexts running.
