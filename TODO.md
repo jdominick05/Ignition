@@ -25,6 +25,9 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
 - [x] **Camera rate:** the webcam's auto exposure sets its rate, not the backend or pixel format: 30 distinct fps
   in a bright room, 15 in a dim one. `live_ignition.py` reports the read and distinct rate and takes
   `--camera-backend`; `--exposure-priority off` holds 30 fps in dim light, with a darker image and fewer detections.
+- [x] **Install from a release:** the README's Install section gives the release page's pip commands beside the
+  editable checkouts, and both commands work from wheels downloaded from the v0.3.1 release into fresh
+  environments.
 
 ## Active
 
@@ -70,13 +73,11 @@ ignite-xdna `results/model_zoo/` on that branch, G2G means:
 
 ### 3. Release and distribution
 
-- [ ] Add installing from a release page to the README's Install section, beside the editable checkouts.
 - [ ] ignite-xdna is on no package index, so the `npu` extra resolves only with its wheel beside Ignition's.
   Decide whether to publish both to PyPI.
 - [ ] No `.ignite` container ships, so the NPU path still needs the mlir-aie toolchain. Decide whether a
   prebuilt `yolov8n_full.ignite` can be attached to a release, after checking the model's licence.
 - [ ] The published v0.2.0 notes still quote the figures v0.3.1 corrects. Decide whether to edit them.
-- **Done when:** the README's install commands, copied from a release page, work in a fresh environment.
 
 ### 4. Hardware and Python coverage
 
