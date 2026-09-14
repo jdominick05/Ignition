@@ -10,7 +10,7 @@
 Ignition runs YOLOv8n object detection on the NPU built into AMD Ryzen AI processors. All 66 layers of the network run on the NPU, not your CPU. Point it at a webcam and each captured frame becomes labelled boxes in about 8 milliseconds.
 
 - **About 26% lower end-to-end latency than AMD's stack.** The same model and image took 8.09–8.27 ms per frame through Ignition and 11.09–11.13 ms through AMD's ONNX Runtime Vitis AI execution provider, measured back to back on the same machine.
-- **About 5× faster than the CPU.** The same model on ONNX Runtime's CPU path took 41.6 ms per frame.
+- **Inference about 5× faster than on the CPU.** The network itself took 7.5 ms on the NPU and 37.0 ms on ONNX Runtime's CPU path, for the same model and image. End to end, a frame took 8.1–8.3 ms against 41.6 ms.
 - **Lighter to install and run.** Resident memory was 192 MB against AMD's 306–308 MB (37% less), and the runtime install is about 318 MB against 4.7 GB (93% smaller).
 - **Same answers.** On the reference image both stacks find the same five objects, and their boxes overlap 97% on average (mean IoU 0.968).
 - **A working app included.** `python live_ignition.py` opens your webcam with boxes, labels, confidence scores and a live latency readout.
@@ -187,7 +187,7 @@ Latency is measured glass to glass: from the moment the loop takes a frame to th
 | Head readback | The P3, P4 and P5 box and class tensors are read from the output buffer | 0.24 ms |
 | Decode and NMS | DFL box decode and per-class non-maximum suppression on the host | 0.28 ms |
 
-These stage times come from the webcam re-check above (5.43 objects per frame).
+These stage times come from the webcam re-check above: 640×480 frames with 5.43 objects per frame. A larger source costs more at ingress; the 810×1080 `bus.jpg` in the AMD comparison took 0.34–0.43 ms.
 - **What the NPU time is spent on:** activations move between host memory and the NPU between layers, so most of the dispatch is data movement. A copy of the container with every weight operation switched off still took 5.37 ms of a 7.39 ms dispatch (ignite-xdna `results/model_zoo/dispatch_floor_yolov8n_full.json`).
 - **The CPU fallback:** an `.onnx` model runs the same steps on ONNX Runtime's CPU execution provider instead.
 - **The camera:** a capture thread (`ThreadedCamera`) owns the webcam so sensor I/O never stalls inference. It tries DirectShow, then Media Foundation, abandons a backend that does not open within `--open-timeout`, and skips empty frames. q, ESC, closing the window, Ctrl+C and Ctrl+Break all release the camera and the NPU.
