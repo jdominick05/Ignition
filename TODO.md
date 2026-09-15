@@ -69,6 +69,12 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   equal ONNX Runtime CPU's byte for byte (32.71), against 32.64 recorded for AMD's stack. In one sitting, 500 frames
   of `bus.jpg` each, it took 8.318 and 8.339 ms from frame to people against 12.056 and 12.089 ms on AMD's stack,
   and 8.360 and 8.481 ms through `live_ignition.py` (ignite-xdna `results/aie/yolov8n_pose_phoenix_20260915T1919Z.log`).
+- [x] **One-step installer** (recorded in the commit that adds this entry): `install.ps1`, pasted into PowerShell,
+  installs or updates the NPU path. It checks the NPU driver (and installs AMD's production driver with
+  `-InstallDriver`), installs Python 3.13 and Git through winget when missing, installs the XRT SDK 2.21.75, clones
+  both projects, and builds one environment with mlir-aie 1.4.2 and llvm-aie. Installed from local branches into a
+  scratch folder, its printed instructions compiled YOLOv8n in 13.2 s and ran `bus.jpg` at 7.886 ms mean
+  glass-to-glass, 5 detections per frame; a second run updated the checkouts in place.
 
 ## Active
 
@@ -148,6 +154,22 @@ every weight operation switched off (ignite-xdna `results/model_zoo/dispatch_flo
 - [ ] Keep activations on the NPU between layers in ignite-xdna (SESR M7's target needs the same change),
   then re-run the AMD comparison in one sitting.
 - **Done when:** Ignition's NPU stage is no slower than AMD's in a same-sitting run.
+
+### 5. Compile time (ignite-xdna)
+
+`ignite-compile` runs its stages one after another, each on one core. One YOLOv8n compile on the 8-core,
+16-thread Ryzen 7 8700G, run in the environment `install.ps1` builds and measured inside a job object on 2026-09-15,
+took 13.7 s wall-clock and 15.25 s of CPU across 70 processes: 1.11 cores on average, one thread above half a core
+for 94 % of the time, and a peak of 5.5 cores only in its last half second. In order, the stages were Python
+lowering and scheduling (0–1.9 s), `clang++` compiling `engine.cc` (1.9–4.9 s, 3.1 s CPU), and `aiecc` on the
+1 MB `design.mlir` (5.3–13.5 s, 8.6 s CPU on one busy thread).
+
+- [ ] Make `ignite-compile` detect the host's cores and use them:
+  - compile `engine.cc` while lowering runs, or reuse its object when `kernel_sha256` and the compile flags are
+    unchanged;
+  - find which of `aiecc`'s steps take its 8 s, and run the ones that can be split in parallel.
+- **Done when:** a compile keeps more than one core busy for most of its wall-clock time, is faster than a serial
+  compile of the same model on the same host, and writes `insts.bin` and `wpackets.bin` byte-identical to it.
 
 ## Needs a decision: duplicated history on `main`
 

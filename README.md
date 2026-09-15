@@ -1,13 +1,10 @@
 ``` 
- (                                  
- )\ )                )              
-(()/((  (      (  ( /((             
- /(_))\))( (   )\ )\())\  (   (     
-(_))((_))\ )\ |(_|_))((_) )\  )\ )  
-|_ _|(()(_)(_/((_) |_ (_)((_)_(_/(  
- | |/ _` | ' \)) |  _|| / _ \ ' \)) 
-|___\__, |_||_||_|\__||_\___/_||_|  
-    |___/                               
+██╗ ██████╗ ███╗   ██╗██╗████████╗██╗ ██████╗ ███╗   ██╗
+██║██╔════╝ ████╗  ██║██║╚══██╔══╝██║██╔═══██╗████╗  ██║
+██║██║  ███╗██╔██╗ ██║██║   ██║   ██║██║   ██║██╔██╗ ██║
+██║██║   ██║██║╚██╗██║██║   ██║   ██║██║   ██║██║╚██╗██║
+██║╚██████╔╝██║ ╚████║██║   ██║   ██║╚██████╔╝██║ ╚████║
+╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═══╝                            
 ```
 
 **Real-time object detection on the AMD Ryzen™ AI NPU: faster end to end than AMD's own runtime, from a fraction of the install size.**
@@ -87,9 +84,35 @@ The same model (`yolov8n_cut_xint8.onnx`, AMD Quark XINT8) ran on the same image
 
 - **Hardware:** a Windows 11 PC with an AMD Phoenix NPU and AMD's NPU driver.
 - **Python:** the version the XRT SDK's `pyxrt` was built for, 3.13 with XRT 2.21.0; `pyxrt` does not load on others. The CPU path on its own runs on 3.10 to 3.13.
-- **Runtime and model:** [ignite-xdna](https://github.com/jdominick05/ignite-xdna) checked out next to Ignition, with the YOLOv8n container built there by `ignite-compile --engine graph --output build/yolov8n_full.ignite` (needs the mlir-aie IRON toolchain; see ignite-xdna's README).
+- **A model to compile:** an AMD Quark XINT8 ONNX model with its detection head cut, such as `yolov8n_cut_xint8.onnx`. Neither project ships one: ignite-xdna's `pipelines/yolov8n/` scripts export it from Ultralytics and quantize it, in the environment its [setup notes](https://github.com/jdominick05/ignite-xdna/blob/main/docs/SETUP.md#yolov8n) describe, separate from the NPU's Python 3.13.
 
 ### Install
+
+**In one step, from PowerShell.** Paste this into a PowerShell window, and paste it again later to update:
+
+```powershell
+irm https://raw.githubusercontent.com/jdominick05/Ignition/main/install.ps1 | iex
+```
+
+The script puts everything in `%LOCALAPPDATA%\Ignition` except the XRT SDK, which goes in `C:\Xilinx\XRT\xrt_sdk`. It:
+- **Checks the NPU driver.** If the driver is older than 32.0.20101.3760 or missing, the script says where to get [AMD's production driver](https://download.amd.com/opendownload/RyzenAI/Driver/NPU_RAI_376_WHQL.zip). With `-InstallDriver` it installs that driver by running AMD's installer with `--AcceptAmdEula`, which accepts AMD's licence agreement for you.
+- **Installs prerequisites.** It installs Python 3.13 and Git with winget if they are missing, installs the XRT SDK 2.21.75 after checking its SHA-256, and clones ignite-xdna and Ignition.
+- **Builds the environment.** It creates a Python environment with both projects and mlir-aie 1.4.2 with its llvm-aie (Peano) compiler, the toolchain `ignite-compile` needs.
+- **Checks the result.** It confirms that Ignition sees the NPU.
+
+Options go after the script block. `-InstallDriver` installs AMD's driver, `-InstallRoot` picks another folder, `-Python` uses a Python 3.13 you already have, and `-ReinstallXrt` replaces an existing XRT SDK:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jdominick05/Ignition/main/install.ps1))) -InstallDriver
+```
+
+**Then compile a model and run it on the webcam.** In each new PowerShell window, the first line sets up the session and moves into the Ignition checkout. `Bypass` applies to that window only. The second line compiles your model to the container `live_ignition.py` loads by default, and the third opens webcam 0:
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force; . "$env:LOCALAPPDATA\Ignition\ignition-env.ps1"
+ignite-compile --engine graph --input C:\path\to\yolov8n_cut_xint8.onnx --output "$env:LOCALAPPDATA\Ignition\src\ignite-xdna\build\yolov8n_full.ignite"
+python live_ignition.py
+```
 
 **From a release.** Download the wheels from the [v0.3.1 release](https://github.com/jdominick05/Ignition/releases/tag/v0.3.1) into one folder and run pip in that folder; GitLab's release carries the same files. For the NPU path:
 
@@ -351,6 +374,7 @@ Open work is tracked in [TODO.md](TODO.md).
 ```
 Ignition/
 ├── .github/                   # README badges: badges.toml, badges.py, and the workflow that checks them
+├── install.ps1                # one-step PowerShell installer and updater (see Install)
 ├── live_ignition.py           # launches ignition.live from this checkout
 ├── src/ignition/
 │   ├── __init__.py            # compile(), devices()
