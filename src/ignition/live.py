@@ -517,7 +517,7 @@ def main(argv=None) -> int:
     print(f"[Ignition] source: {source.label}", flush=True)
 
     capacity = args.frames if args.frames > 0 else 10_000
-    g2g, pre, net, dispatch, readback, post, age = (Samples(capacity) for _ in range(7))
+    g2g, pre, net, dispatch, host, readback, post, age = (Samples(capacity) for _ in range(8))
     frame_limit = args.warmup + args.frames if args.frames > 0 else 0
     processed = timed = unique = npu_frames = detections = 0
     top1_counts: Dict[int, int] = {}
@@ -566,6 +566,8 @@ def main(argv=None) -> int:
                 if "dispatch_ms" in t:
                     dispatch.add(t["dispatch_ms"])
                     readback.add(t["readback_ms"])
+                if "host_ms" in t:
+                    host.add(t["host_ms"])
                 if args.fresh and source.kind == "camera":
                     age.add((t_done - arrival) * 1000.0)
                 npu_frames += output_source(task, result) == "npu"
@@ -628,9 +630,11 @@ def main(argv=None) -> int:
         print(f"[summary] G2G mean {v.mean():.3f} ms | P50 {p50:.3f} | P95 {p95:.3f} | P99 {p99:.3f} | "
               f"max {v.max():.3f} | over the last {v.size} timed frames; cold first frame {cold_ms:.2f} ms",
               flush=True)
-        stages = f"preprocess {pre.mean():.3f} | {'NPU forward' if native else 'ONNX Runtime'} {net.mean():.3f}"
+        forward = "NPU + host forward" if host.count else "NPU forward"
+        stages = f"preprocess {pre.mean():.3f} | {forward if native else 'ONNX Runtime'} {net.mean():.3f}"
         if dispatch.count:
-            stages += f" (dispatch {dispatch.mean():.3f}, readback {readback.mean():.3f})"
+            host_part = f", host {host.mean():.3f}" if host.count else ""
+            stages += f" (dispatch {dispatch.mean():.3f}{host_part}, readback {readback.mean():.3f})"
         post_name = {TASK_DETECT: "decode+NMS", TASK_CLASSIFY: "softmax+top-k"}.get(task, "image output")
         print(f"[summary] stage means (ms): {stages} | {post_name} {post.mean():.3f}", flush=True)
         if age.count:
@@ -650,7 +654,8 @@ def main(argv=None) -> int:
                        "min": float(v.min()), "max": float(v.max()), "cold_first_frame": float(cold_ms)},
             "fps_from_mean": 1000.0 / float(v.mean()),
             "stages_ms": {"preprocess": pre.mean(), "network": net.mean(), "postprocess": post.mean(),
-                          **({"dispatch": dispatch.mean(), "readback": readback.mean()} if dispatch.count else {})},
+                          **({"dispatch": dispatch.mean(), "readback": readback.mean()} if dispatch.count else {}),
+                          **({"host": host.mean()} if host.count else {})},
             "rss_mb": {"first_timed": rss_first, "end": rss_last, "drift": rss_last - rss_first},
             "npu_frames": npu_frames,
         })
