@@ -20,6 +20,7 @@ whole network on NPU Device 0 through ignite-xdna; ONNX Runtime is not called. A
 manifest or the ONNX output shapes (--task overrides it):
   detect            YOLO (six head-cut outputs or one (1, 84, N) tensor): boxes, labels, scores
   classify          one (1, N) output, e.g. ResNet50: timm eval preprocessing, top-5
+  pose              YOLOv8-pose (nine head-cut outputs): people, each with 17 keypoints
   super_resolution  one image output a whole multiple of the input size, e.g. SESR M7 (2x)
 The default model is ignite-xdna's graph-engine container build\yolov8n_full.ignite
 when it exists, otherwise build\yolov8n.ignite, which carries no detect heads and so
@@ -64,7 +65,7 @@ import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
 from ignition.pipelines.vision import (  # noqa: E402
-    TASK_CLASSIFY, TASK_DETECT, TASK_SUPER_RESOLUTION, TASKS, create_pipeline, infer_task)
+    TASK_CLASSIFY, TASK_DETECT, TASK_POSE, TASK_SUPER_RESOLUTION, TASKS, create_pipeline, draw_poses, infer_task)
 from ignition.pipelines.yolo import draw_detections, is_ignite_container  # noqa: E402
 
 try:
@@ -411,12 +412,15 @@ def output_count(task: str, result: Any) -> str:
     if task == TASK_CLASSIFY:
         top = result.topk[0]
         return f"top-1 class {top.class_id} ({top.score:.2f})"
+    if task == TASK_POSE:
+        return f"{len(result.people)} people"
     return f"{result.image.shape[1]}x{result.image.shape[0]} output"
 
 
 def render(frame: np.ndarray, display: Optional[np.ndarray], task: str, result: Any, fps: float,
            backend: str, source: str) -> np.ndarray:
-    """The image to show: boxes on the frame, the top-5 over the frame, or the upscaled frame; plus the HUD."""
+    """The image to show: boxes or skeletons on the frame, the top-5 over the frame, or the upscaled frame; plus
+    the HUD."""
     if task == TASK_SUPER_RESOLUTION:
         canvas = result.image.copy()
     else:
@@ -433,6 +437,8 @@ def render(frame: np.ndarray, display: Optional[np.ndarray], task: str, result: 
     ]
     if task == TASK_DETECT:
         draw_detections(canvas, result.detections, inplace=True)
+    elif task == TASK_POSE:
+        draw_poses(canvas, result.people, inplace=True)
     elif task == TASK_CLASSIFY:
         lines += [f"class {c.class_id:4d}  p={c.score:.3f}" for c in result.topk]
     cv2.rectangle(canvas, (0, 0), (canvas.shape[1], 12 + 20 * len(lines)), (0, 0, 0), -1)
@@ -471,8 +477,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--warmup", type=int, default=10, help="untimed frames before the timed ones (default 10)")
     ap.add_argument("--fresh", action="store_true",
                     help="wait for a new camera frame before each inference instead of reusing the newest one")
-    ap.add_argument("--conf", type=float, default=0.25, help="detection confidence threshold (default 0.25)")
-    ap.add_argument("--iou", type=float, default=0.45, help="detection NMS IoU threshold (default 0.45)")
+    ap.add_argument("--conf", type=float, default=0.25, help="confidence threshold for detections and people (default 0.25)")
+    ap.add_argument("--iou", type=float, default=0.45, help="NMS IoU threshold for detections and people (default 0.45)")
     ap.add_argument("--open-timeout", type=float, default=8.0, help="seconds allowed per camera backend open")
     ap.add_argument("--camera-backend", choices=["auto", "dshow", "msmf", "any"], default="auto",
                     help="OpenCV capture backend for a webcam; auto tries DirectShow, then Media Foundation, "
@@ -519,7 +525,7 @@ def main(argv=None) -> int:
     capacity = args.frames if args.frames > 0 else 10_000
     g2g, pre, net, dispatch, host, readback, post, age = (Samples(capacity) for _ in range(8))
     frame_limit = args.warmup + args.frames if args.frames > 0 else 0
-    processed = timed = unique = npu_frames = detections = 0
+    processed = timed = unique = npu_frames = detections = people = 0
     top1_counts: Dict[int, int] = {}
     output_shape: Optional[List[int]] = None
     last_seq = 0
@@ -575,6 +581,8 @@ def main(argv=None) -> int:
                     detections += len(result.detections)
                 elif task == TASK_CLASSIFY:
                     top1_counts[result.topk[0].class_id] = top1_counts.get(result.topk[0].class_id, 0) + 1
+                elif task == TASK_POSE:
+                    people += len(result.people)
                 else:
                     output_shape = [int(v) for v in result.image.shape]
 
@@ -635,7 +643,8 @@ def main(argv=None) -> int:
         if dispatch.count:
             host_part = f", host {host.mean():.3f}" if host.count else ""
             stages += f" (dispatch {dispatch.mean():.3f}{host_part}, readback {readback.mean():.3f})"
-        post_name = {TASK_DETECT: "decode+NMS", TASK_CLASSIFY: "softmax+top-k"}.get(task, "image output")
+        post_name = {TASK_DETECT: "decode+NMS", TASK_POSE: "decode+NMS",
+                     TASK_CLASSIFY: "softmax+top-k"}.get(task, "image output")
         print(f"[summary] stage means (ms): {stages} | {post_name} {post.mean():.3f}", flush=True)
         if age.count:
             print(f"[summary] camera arrival to output mean {age.mean():.3f} ms", flush=True)
@@ -645,6 +654,10 @@ def main(argv=None) -> int:
         elif task == TASK_CLASSIFY:
             top = max(top1_counts.items(), key=lambda kv: kv[1])
             print(f"[summary] top-1 class {top[0]} on {top[1]}/{timed} timed frames", flush=True)
+        elif task == TASK_POSE:
+            origin = (f"keypoints from NPU heads on {npu_frames}/{timed} timed frames" if native
+                      else "keypoints from ONNX Runtime")
+            print(f"[summary] {origin} | {people / timed:.2f} people per frame", flush=True)
         else:
             print(f"[summary] output image {output_shape} from {'the NPU' if native else 'ONNX Runtime'}", flush=True)
         print(f"[summary] RSS {rss_first:.1f} MB at the first timed frame, {rss_last:.1f} MB at the end "
@@ -663,6 +676,8 @@ def main(argv=None) -> int:
             record["detections_per_frame"] = detections / timed
         elif task == TASK_CLASSIFY:
             record["top1_class_counts"] = {str(k): n for k, n in sorted(top1_counts.items())}
+        elif task == TASK_POSE:
+            record["people_per_frame"] = people / timed
         else:
             record["output_shape"] = output_shape
     if args.json:

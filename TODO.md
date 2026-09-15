@@ -63,6 +63,12 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   layers exact on Device 0. In one sitting, 500 frames each, the attention-core container took 10.411 and 10.115 ms
   mean glass-to-glass (CPU step 0.533 and 0.505 ms) against 11.109 and 10.987 ms with the whole block on the CPU and
   36.361 and 34.549 ms on AMD's stack (ignite-xdna `results/aie/yolo11n_attention_core_phoenix_20260915T1522Z.log`).
+- [x] **YOLOv8n-pose on the NPU** (ignite-xdna `c762c0e`): pose containers (nine heads: box, person score and 17
+  keypoints) run all 75 layers on the NPU, exact on Device 0, and `live_ignition.py` draws each person's skeleton.
+  On all 5,000 COCO val2017 images the container scored 32.77 OKS mAP@50-95; on the numpy letterbox its detections
+  equal ONNX Runtime CPU's byte for byte (32.71), against 32.64 recorded for AMD's stack. In one sitting, 500 frames
+  of `bus.jpg` each, it took 8.318 and 8.339 ms from frame to people against 12.056 and 12.089 ms on AMD's stack,
+  and 8.360 and 8.481 ms through `live_ignition.py` (ignite-xdna `results/aie/yolov8n_pose_phoenix_20260915T1919Z.log`).
 
 ## Active
 
@@ -84,8 +90,9 @@ ignite-xdna's `tools/model_zoo_bench.py` drives Ignition for the suites. Measure
 On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.64 ms, in a separate sitting
 (ignite-xdna `results/aie/model_zoo_main_phoenix_20260914T2209Z.log`).
 
-- [ ] Raise the `npu` extra's minimum to the first ignite-xdna release that ships `pipelines/sr_pipeline.py`,
-  which Ignition's super-resolution path imports; no ignite-xdna release has it yet.
+- [ ] Raise the `npu` extra's minimum to the first ignite-xdna release that ships `pipelines/sr_pipeline.py` and
+  `pipelines/pose_pipeline.py`, which Ignition's super-resolution and pose paths import; no ignite-xdna release has
+  them yet.
 - [ ] YOLO11n on the NPU needs ignite-xdna from source at `0be9132` or later, and `d223e7b` or later to keep only the
   attention core on the CPU; no ignite-xdna release has host segments. Raise the `npu` extra's minimum when one
   does, with the super-resolution item above.
@@ -96,6 +103,9 @@ On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.6
   Vitis AI EP against 38.72 for stock FP32 on the CPU (ignite-xdna `docs/BENCHMARKS.md`, its YOLOv11n section).
 - [ ] Measure YOLO11n's COCO accuracy through the container. On `bus.jpg` it finds 6 objects where ONNX Runtime
   on Ignition's numpy letterbox finds 7, because the two inputs differ by one code in 15% of pixel values.
+- [ ] YOLOv8n-pose decodes its keypoints in numpy: decode and NMS take 0.29–0.32 ms per frame against 0.03 ms for
+  YOLOv8n's native decode. A container from the AdaRound pose model (34.32 OKS mAP@50-95 on AMD's stack) is not
+  built or checked.
 - [ ] ResNet50 has no `.ignite` lowering yet.
 - [ ] SESR M7 dispatch is 4.25 ms against a 1.5 ms target, with a 2.53 ms non-compute floor (§4).
 

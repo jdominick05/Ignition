@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """
 src/ignition/pipelines/vision.py
-Image classification and super-resolution pipelines, and the model-kind dispatch that lets one
-camera loop (live_ignition.py) serve detection, classification and super-resolution models.
+Image classification, pose estimation and super-resolution pipelines, and the model-kind dispatch
+that lets one camera loop (live_ignition.py) serve detection, classification, pose and
+super-resolution models.
 
 The model file selects the execution path, as for YOLOPipeline:
   * ``.onnx``: ONNX Runtime with the CPU execution provider.
@@ -35,7 +36,8 @@ _log = logging.getLogger("ignition")
 TASK_DETECT = "detect"
 TASK_CLASSIFY = "classify"
 TASK_SUPER_RESOLUTION = "super_resolution"
-TASKS = (TASK_DETECT, TASK_CLASSIFY, TASK_SUPER_RESOLUTION)
+TASK_POSE = "pose"
+TASKS = (TASK_DETECT, TASK_CLASSIFY, TASK_SUPER_RESOLUTION, TASK_POSE)
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -74,10 +76,12 @@ def _onnx_io_shapes(model_path: Path) -> Tuple[List[List[Any]], List[List[Any]]]
 
 
 def infer_task(model_path: Union[str, Path]) -> str:
-    """``detect``, ``classify`` or ``super_resolution``, from the container manifest or the ONNX output shapes.
+    """``detect``, ``classify``, ``pose`` or ``super_resolution``, from the container manifest or the ONNX
+    output shapes.
 
-    ONNX: six outputs (a head-cut YOLO) or one ``(1, 84, N)`` tensor is detection; one 2-D output is
-    classification; one 4-D output whose height is a whole multiple of the input height is
+    ONNX: six outputs (a head-cut YOLO) or one ``(1, 84, N)`` tensor is detection; nine outputs, three of
+    them with 51 channels (a head-cut YOLOv8-pose: 17 keypoints x 3), are pose estimation; one 2-D output
+    is classification; one 4-D output whose height is a whole multiple of the input height is
     super-resolution.
     """
     path = Path(model_path)
@@ -87,6 +91,8 @@ def infer_task(model_path: Union[str, Path]) -> str:
             raise ValueError(f"{path} declares task {task!r}; Ignition serves {TASKS}")
         return task
     inputs, outputs = _onnx_io_shapes(path)
+    if len(outputs) == 9 and sum(len(o) == 4 and o[1] == 51 for o in outputs) == 3:
+        return TASK_POSE
     if len(outputs) == 6 or (len(outputs) == 1 and len(outputs[0]) == 3 and outputs[0][1] == 84):
         return TASK_DETECT
     if len(outputs) == 1 and len(outputs[0]) == 2:
@@ -195,6 +201,159 @@ class ClassificationPipeline:
 
     def close(self) -> None:
         self.session = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+
+# -- pose estimation -----------------------------------------------------------------
+# COCO's 17-point skeleton as ultralytics draws it, 0-indexed: nose, eyes, ears, shoulders, elbows, wrists,
+# hips, knees, ankles.
+POSE_SKELETON = (
+    (15, 13), (13, 11), (16, 14), (14, 12), (11, 12), (5, 11), (6, 12),
+    (5, 6), (5, 7), (6, 8), (7, 9), (8, 10), (1, 2), (0, 1), (0, 2),
+    (1, 3), (2, 4), (3, 5), (4, 6),
+)
+
+
+@dataclass
+class Person:
+    """One person in source pixels: box ``(x, y, w, h)``, score, and 17 COCO keypoints as float32 ``(x, y,
+    visibility)`` rows."""
+    x: float
+    y: float
+    w: float
+    h: float
+    score: float
+    keypoints: np.ndarray
+
+
+@dataclass
+class PoseResult:
+    """People (best first) and stage latencies.
+
+    ``source`` is ``"onnxruntime"`` or ``"npu"``; ``pipeline_timings`` is ignite-xdna's per-frame
+    timing record for NPU frames."""
+    people: List[Person]
+    timings_ms: Dict[str, float]
+    orig_shape: Tuple[int, int]
+    source: str = "onnxruntime"
+    pipeline_timings: Optional[Any] = None
+
+
+def draw_poses(img_bgr: np.ndarray, people: List[Person], kpt_conf: float = 0.5,
+               color: Tuple[int, int, int] = (0, 230, 115), inplace: bool = False) -> np.ndarray:
+    """Draws each person's box, score and skeleton, joining keypoints whose visibility is at least ``kpt_conf``
+    (a copy unless ``inplace``)."""
+    canvas = img_bgr if inplace else img_bgr.copy()
+    for person in people:
+        x1, y1 = int(round(person.x)), int(round(person.y))
+        x2, y2 = int(round(person.x + person.w)), int(round(person.y + person.h))
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 1, cv2.LINE_AA)
+        cv2.putText(canvas, f"person {person.score:.2f}", (x1 + 3, max(y1 - 5, 12)), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5, color, 1, cv2.LINE_AA)
+        kpts = person.keypoints
+        visible = kpts[:, 2] >= kpt_conf
+        for a, b in POSE_SKELETON:
+            if visible[a] and visible[b]:
+                cv2.line(canvas, (int(kpts[a, 0]), int(kpts[a, 1])), (int(kpts[b, 0]), int(kpts[b, 1])),
+                         (255, 160, 0), 2, cv2.LINE_AA)
+        for (px, py, _), shown in zip(kpts, visible):
+            if shown:
+                cv2.circle(canvas, (int(px), int(py)), 3, (0, 0, 255), -1, cv2.LINE_AA)
+    return canvas
+
+
+class PosePipeline:
+    """YOLOv8-pose: people and 17 keypoints each.
+
+    An ``.ignite`` container runs every layer on NPU ``device_id`` through ignite-xdna's pose pipeline; a
+    head-cut ``.onnx`` model (nine outputs) runs on ONNX Runtime's CPU provider. Both decode the nine heads
+    with ignite-xdna's ``PoseDecoder`` (DFL boxes, sigmoid score, keypoints, class-agnostic NMS), so the
+    ignite-xdna package is needed for either.
+    """
+
+    task = TASK_POSE
+
+    def __init__(self, model_path: Union[str, Path], backend: str = "cpu", conf_thres: float = 0.25,
+                 iou_thres: float = 0.45, device_id: int = 0):
+        self.model_path = Path(model_path)
+        self.device_id = device_id
+        self.conf_thres = conf_thres
+        self.iou_thres = iou_thres
+        self.session = None
+        self.native: Optional[Any] = None
+        self.is_native = is_ignite_container(self.model_path)
+        try:
+            from ignite_xdna.pipelines import pose_pipeline
+        except ImportError as exc:
+            raise ImportError("pose models need ignite-xdna's pose_pipeline, which decodes the heads of "
+                              ".ignite and .onnx models alike") from exc
+        self._pose = pose_pipeline
+        if self.is_native:
+            if backend.lower() not in NATIVE_BACKENDS:
+                raise ValueError(f"{self.model_path} is an .ignite container, which runs only on the NPU")
+            native = pose_pipeline.PosePipeline(self.model_path, device_index=device_id, conf_thres=conf_thres,
+                                                iou_thres=iou_thres)
+            self.native = native
+            self._native_finalizer = weakref.finalize(self, _release_native, native)
+            self.backend_name = "xdna1"
+            _log.info("[Ignition] Native XDNA1 NPU backend active (Device %d)", device_id)
+        else:
+            note_onnx_runs_on_cpu(self.model_path, backend.lower())
+            self.backend_name = "cpu"
+            self.session = _ort_session(self.model_path)
+            self.input_name = self.session.get_inputs()[0].name
+            shapes = [tuple(o.shape) for o in self.session.get_outputs()]
+            branch = {64: 0, 1: 1, 51: 2}
+            if len(shapes) != 9 or any(len(s) != 4 or s[1] not in branch or not isinstance(s[2], int) for s in shapes):
+                raise ValueError(f"{self.model_path}: expected nine head-cut YOLOv8-pose outputs, got {shapes}")
+            # ignite-xdna's head order: box, score, keypoints, each at strides 8, 16, 32 (largest grid first)
+            self._order = sorted(range(9), key=lambda i: (branch[shapes[i][1]], -shapes[i][2]))
+            self._decoder = pose_pipeline.PoseDecoder(imgsz=int(self.session.get_inputs()[0].shape[3]),
+                                                      conf_thres=conf_thres, iou_thres=iou_thres)
+
+    def predict(self, image: Union[str, Path, np.ndarray]) -> PoseResult:
+        img_bgr = load_bgr(image, copy=False)
+        shape = (img_bgr.shape[0], img_bgr.shape[1])
+        if self.is_native:
+            native = self.native
+            if native is None:
+                raise RuntimeError("PosePipeline is closed")
+            t0 = time.perf_counter()
+            found, hw = native.predict_sync(img_bgr, conf_thres=self.conf_thres, iou_thres=self.iou_thres)
+            people = [Person(d.x0, d.y0, d.w, d.h, d.score, d.keypoints) for d in found]
+            g2g = (time.perf_counter() - t0) * 1000.0
+            timings = {"preprocess_ms": hw.preprocess_ms, "backbone_ms": hw.npu_forward_ms,
+                       "postprocess_ms": hw.postprocess_ms, "g2g_ms": g2g, "total_ms": g2g,
+                       "dispatch_ms": hw.dispatch_ms, "readback_ms": hw.readback_ms}
+            return PoseResult(people, timings, shape, "npu", hw)
+        if self.session is None:
+            raise RuntimeError("PosePipeline is closed")
+        t0 = time.perf_counter()
+        x, pad, scale = self._pose.letterbox(img_bgr, self._decoder.imgsz)
+        t1 = time.perf_counter()
+        outs = self.session.run(None, {self.input_name: x})
+        t2 = time.perf_counter()
+        decoder = self._decoder
+        found = decoder.postprocess(decoder.decode([outs[i] for i in self._order], None, self.conf_thres), pad,
+                                    scale, self.conf_thres, self.iou_thres)
+        people = [Person(d.x0, d.y0, d.w, d.h, d.score, d.keypoints) for d in found]
+        t3 = time.perf_counter()
+        g2g = (t3 - t0) * 1000.0
+        timings = {"preprocess_ms": (t1 - t0) * 1000.0, "backbone_ms": (t2 - t1) * 1000.0,
+                   "postprocess_ms": (t3 - t2) * 1000.0, "g2g_ms": g2g, "total_ms": g2g}
+        return PoseResult(people, timings, shape)
+
+    def close(self) -> None:
+        """Releases the ONNX Runtime session or the NPU hardware context; safe to call again."""
+        self.session = None
+        if self.native is not None:
+            self.native = None
+            self._native_finalizer()
 
     def __enter__(self):
         return self
@@ -323,4 +482,7 @@ def create_pipeline(model_path: Union[str, Path], task: Optional[str] = None, co
         return task, ClassificationPipeline(path, backend=backend, device_id=device_id)
     if task == TASK_SUPER_RESOLUTION:
         return task, SuperResolutionPipeline(path, backend=backend, device_id=device_id)
+    if task == TASK_POSE:
+        return task, PosePipeline(path, backend=backend, conf_thres=conf_thres, iou_thres=iou_thres,
+                                  device_id=device_id)
     raise ValueError(f"unknown task {task!r}; expected one of {TASKS}")
