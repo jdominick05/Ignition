@@ -2,6 +2,10 @@
 
 Reference for what the README's walkthrough leaves out. Install with the README's one-step installer first.
 
+Building a model of your own is a separate subject: [QUANTIZATION-GUIDE.md](QUANTIZATION-GUIDE.md), beside this
+file, covers which operations compile, the shapes the NPU's tile rewards, the XINT8 recipe, where AdaRound is
+worth its hours, and how to validate the result before quoting a number.
+
 ## Compatibility
 
 | | Status | Details |
