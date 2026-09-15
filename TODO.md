@@ -48,6 +48,10 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   and writes one JSON record and log per model plus an index, refusing an existing output directory. The app
   moved into the package as `ignition.live`; `live_ignition.py` launches it from a checkout
   ([README](README.md#6-compare-models-in-one-command)).
+- [x] **ignite-xdna's suites on `ignition suite`** (ignite-xdna `373d897`): `tools/model_zoo_bench.py` hands its
+  presets to `ignition suite`, writes each run's records into a new `results/model_zoo/<suite>_<UTC time>/`
+  directory, and rewrites its JSON and `docs/MODEL_ZOO_BENCHMARKS.md`'s tables only when every run is clean. The
+  tables there were not re-run.
 
 ## Active
 
@@ -71,9 +75,6 @@ On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.6
 
 - [ ] Raise the `npu` extra's minimum to the first ignite-xdna release that ships `pipelines/sr_pipeline.py`,
   which Ignition's super-resolution path imports; no ignite-xdna release has it yet.
-- [ ] ignite-xdna's `tools/model_zoo_bench.py` still runs `live_ignition.py` from a sibling checkout and writes one
-  JSON file per suite for `docs/MODEL_ZOO_BENCHMARKS.md`'s tables. Point it at `ignition suite`'s records or
-  retire it (an ignite-xdna change).
 - [ ] YOLO11n detects only with its C2PSA attention block, so lowering it needs attention on the NPU or a model
   retrained without the block (ignite-xdna work). Through Ignition on `bus.jpg`, on the CPU, stock YOLO11n finds
   the bus and the people in FP32 and XINT8. The C2PSA-ablated `yolo11n_no_c2psa` finds nothing at confidence 0.25
