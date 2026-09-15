@@ -90,7 +90,21 @@ On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.6
 - [ ] ignite-xdna is on no package index, so the `npu` extra resolves only with its wheel beside Ignition's.
   Decide whether to publish both to PyPI.
 - [ ] No `.ignite` container ships, so the NPU path still needs the mlir-aie toolchain. Decide whether a
-  prebuilt `yolov8n_full.ignite` can be attached to a release, after checking the model's licence.
+  prebuilt `yolov8n_full.ignite` can be attached to a release. The licence check found:
+  - **A container carries the model's trained weights.** Its manifest lists `engine.xclbin` (188,542 B, the NPU
+    program built from ignite-xdna's `kernels/aie2/conv_engine/engine.cc`), `insts.bin` (430,180 B) and
+    `wpackets.bin` (8,164,864 B, YOLOv8n's quantized weights) (ignite-xdna
+    `results/model_zoo/manifest_yolov8n_full.json`).
+  - **No file records the weights' licence.** ignite-xdna's `pipelines/yolov8n/1_export.py` loads `yolov8n.pt`
+    through `ultralytics`, which downloads it. The `ultralytics` 8.4.142 package installed in the export
+    environment here declares AGPL-3.0 and offers an Enterprise licence covering "Ultralytics software and AI
+    models" in products that bypass the AGPL's requirements. Ignition and ignite-xdna are AGPL-3.0, but neither
+    states the weights' terms, and ignite-xdna's README says upstream model artifacts "are not redistributed here".
+  - **ignite-xdna's file headers disagree with its licence.** Its LICENSE and README say AGPL-3.0, while 44 files
+    under `src/`, `tools/`, `npu/` and `kernels/` carry Apache-2.0 SPDX headers, 2 carry MIT, and `engine.cc`
+    carries none.
+  - **Portability is unrecorded.** The manifest pins kernel and xclbin hashes but no NPU driver or XRT version,
+    and the only verified setup is the one in the README's [Compatibility](README.md#compatibility) table.
 - [ ] The published v0.2.0 notes still quote the figures v0.3.1 corrects. Decide whether to edit them.
 
 ### 3. Hardware coverage
