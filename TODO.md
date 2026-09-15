@@ -58,6 +58,11 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   `live_ignition.py` took 10.996 and 11.048 ms mean glass-to-glass (NPU dispatch 8.45 ms, attention block
   1.69 ms, reported as the `host` stage). AMD's stack took 34.492 and 34.366 ms, and ONNX Runtime's CPU provider
   31.328 ms (ignite-xdna `results/aie/yolo11n_hybrid_phoenix_20260915T0216Z.log`, [README](README.md#yolo11n-with-its-attention-block)).
+- [x] **YOLO11n's attention-block convolutions on the NPU** (ignite-xdna `d223e7b`): the CPU step keeps only the attention
+  core (two matrix multiplies and a softmax); the block's seven convolutions and residual adds run on the NPU, all 91
+  layers exact on Device 0. In one sitting, 500 frames each, the attention-core container took 10.411 and 10.115 ms
+  mean glass-to-glass (CPU step 0.533 and 0.505 ms) against 11.109 and 10.987 ms with the whole block on the CPU and
+  36.361 and 34.549 ms on AMD's stack (ignite-xdna `results/aie/yolo11n_attention_core_phoenix_20260915T1522Z.log`).
 
 ## Active
 
@@ -81,10 +86,12 @@ On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.6
 
 - [ ] Raise the `npu` extra's minimum to the first ignite-xdna release that ships `pipelines/sr_pipeline.py`,
   which Ignition's super-resolution path imports; no ignite-xdna release has it yet.
-- [ ] YOLO11n on the NPU needs ignite-xdna from source at `0be9132` or later; no ignite-xdna release has host
-  segments. Raise the `npu` extra's minimum when one does, with the super-resolution item above.
-- [ ] YOLO11n's attention block runs on the CPU (1.69 ms per frame); running it on the NPU needs attention kernels
-  in ignite-xdna. The block cannot be dropped: the C2PSA-ablated `yolo11n_no_c2psa` finds nothing on `bus.jpg`
+- [ ] YOLO11n on the NPU needs ignite-xdna from source at `0be9132` or later, and `d223e7b` or later to keep only the
+  attention core on the CPU; no ignite-xdna release has host segments. Raise the `npu` extra's minimum when one
+  does, with the super-resolution item above.
+- [ ] YOLO11n's attention core, two matrix multiplies and a softmax, runs on the CPU (0.51–0.53 ms per frame);
+  the engine has no softmax or activation-by-activation multiply, so running it on the NPU is ignite-xdna work.
+  The block cannot be dropped: the C2PSA-ablated `yolo11n_no_c2psa` finds nothing on `bus.jpg`
   (highest class score 0.02 in FP32 and 0.06 in XINT8), and ignite-xdna measured mAP@50-95 0.19 for it on AMD's
   Vitis AI EP against 38.72 for stock FP32 on the CPU (ignite-xdna `docs/BENCHMARKS.md`, its YOLOv11n section).
 - [ ] Measure YOLO11n's COCO accuracy through the container. On `bus.jpg` it finds 6 objects where ONNX Runtime
