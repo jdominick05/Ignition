@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""README badges whose numbers img.shields.io reads live from README.md.
+"""README badges whose numbers img.shields.io reads live from Markdown files in the repository.
 
-The badges are listed in badges.toml next to this file. A number badge names the README section its number comes
-from, an RE2 pattern and a replacement; img.shields.io runs the pattern over README.md on GitHub each time the badge
-is fetched, so a push that changes a number in the README changes its badge. Nothing here commits or publishes.
+The badges are listed in badges.toml next to this file. A number badge names the file its number comes from (`file`,
+README.md unless set), the section of that file, an RE2 pattern and a replacement; img.shields.io runs the pattern
+over that file on GitHub each time the badge is fetched, so a push that changes a number changes its badge. The badge
+block itself always sits in README.md. Nothing here commits or publishes.
 
   check [--require-re2]  the badge block in README.md matches badges.toml, and every pattern matches exactly once,
                          inside its section, with the same groups under Python's re and RE2 (google-re2)
   write                  regenerate the block between the badges markers in README.md, then check
-  live --ref COMMIT      fetch every number badge from img.shields.io against README.md at COMMIT and compare it
+  live --ref COMMIT      fetch every number badge from img.shields.io against its file at COMMIT and compare it
                          with what check computes from that file
 
 Standard library only; RE2 is checked when google-re2 is importable.
@@ -61,6 +62,9 @@ def load_spec(path: Path = SPEC) -> dict:
         for key in ("alt",) + KINDS[kinds[0]]:
             if not isinstance(badge.get(key), str) or not badge[key]:
                 raise ValueError(f"{path.name}: badge {n} needs {key}")
+        if "file" in badge and (kinds[0] != "search" or not isinstance(badge["file"], str) or not badge["file"]
+                                or badge["file"].startswith(("/", "\\")) or ".." in Path(badge["file"]).parts):
+            raise ValueError(f"{path.name}: badge {n}'s file must be a relative path, on a number badge")
         if re.search(r"[\[\]]", badge["alt"]):
             raise ValueError(f"{path.name}: badge {n}'s alt text may not contain brackets")
     return spec
@@ -75,8 +79,13 @@ def number_badges(spec: dict) -> list:
     return [badge for badge in spec["badge"] if "search" in badge]
 
 
-def raw_url(spec: dict, ref: str | None = None) -> str:
-    return f"https://raw.githubusercontent.com/{spec['repository']}/{ref or spec['branch']}/{spec['readme']}"
+def source(spec: dict, badge: dict) -> str:
+    """The repository path of the Markdown file a number badge reads."""
+    return badge.get("file", spec["readme"])
+
+
+def raw_url(spec: dict, ref: str | None = None, path: str | None = None) -> str:
+    return f"https://raw.githubusercontent.com/{spec['repository']}/{ref or spec['branch']}/{path or spec['readme']}"
 
 
 def _static_part(text: str) -> str:
@@ -88,7 +97,7 @@ def static_url(label: str, message: str, color: str) -> str:
 
 
 def regex_url(spec: dict, badge: dict, ref: str | None = None) -> str:
-    query = {"url": raw_url(spec, ref), "search": badge["search"], "replace": badge["replace"],
+    query = {"url": raw_url(spec, ref, source(spec, badge)), "search": badge["search"], "replace": badge["replace"],
              "label": badge["label"], "color": badge["color"]}
     return f"{SHIELDS}/badge/dynamic/regex?" + urllib.parse.urlencode(query, safe="", quote_via=urllib.parse.quote)
 
@@ -107,7 +116,9 @@ def badge_markdown(spec: dict, badge: dict) -> str:
     elif "image" in badge:
         image, link = badge["image"], badge.get("link")
     else:
-        image, link = regex_url(spec, badge), badge.get("link", "#" + slug(badge["section"]))
+        path = source(spec, badge)
+        anchor = "#" + slug(badge["section"])
+        image, link = regex_url(spec, badge), badge.get("link", anchor if path == spec["readme"] else path + anchor)
     markdown = f"![{badge['alt']}]({image})"
     return f"[{markdown}]({link})" if link else markdown
 
@@ -168,15 +179,15 @@ class Result:
     problems: list = field(default_factory=list)
 
 
-def evaluate(badge: dict, text: str, require_re2: bool = False) -> Result:
-    """What the badge renders from `text`, or why it would not render a number from its section."""
+def evaluate(badge: dict, text: str, require_re2: bool = False, where: str = "the README") -> Result:
+    """What the badge renders from `text` (the badge's file), or why it would not render a number from its section."""
     label, search, replace = badge["label"], badge["search"], badge["replace"]
     problems = [f"{key} is not ASCII" for key in ("label", "search", "replace") if not badge[key].isascii()]
     if re.search(r"\$(?!\d)", replace):
         problems.append("replace may only use $1, $2, ...: img.shields.io gives other $ forms their JavaScript meaning")
     span = section_span(text, badge["section"])
     if span is None:
-        problems.append(f"section {badge['section']!r} is not exactly one heading in the README")
+        problems.append(f"section {badge['section']!r} is not exactly one heading in {where}")
     engines = [("re", re)]
     if re2 is not None:
         engines.append(("re2", re2))
@@ -202,7 +213,7 @@ def evaluate(badge: dict, text: str, require_re2: bool = False) -> Result:
         problems.append(f"the match runs outside section {badge['section']!r}")
     refs = [int(n) for n in GROUP.findall(replace)]
     if not refs:
-        problems.append("replace uses no group, so the badge would not show a number from the README")
+        problems.append("replace uses no group, so the badge would not show a number from the file")
     for n in sorted({n for n in refs if not 1 <= n <= len(groups)}):
         problems.append(f"replace uses ${n} but the pattern has {len(groups)} groups")
     if problems:
@@ -214,7 +225,18 @@ def evaluate(badge: dict, text: str, require_re2: bool = False) -> Result:
     return Result(label, message)
 
 
-def check(spec: dict, text: str, require_re2: bool = False) -> bool:
+def read_sources(spec: dict, root: Path = ROOT) -> dict:
+    """Text of every file a number badge reads, keyed by its repository path; a missing file is left out."""
+    texts = {}
+    for path in dict.fromkeys(source(spec, badge) for badge in number_badges(spec)):
+        if (root / path).is_file():
+            texts[path] = read_text(root / path)
+    return texts
+
+
+def check(spec: dict, text: str, require_re2: bool = False, sources: dict | None = None) -> bool:
+    """`text` is README.md; `sources` maps each badge file to its text (README.md's own text when omitted)."""
+    sources = {spec["readme"]: text, **(sources or {})}
     ok = True
     block = current_block(text)
     if block is None:
@@ -224,7 +246,11 @@ def check(spec: dict, text: str, require_re2: bool = False) -> bool:
         print("FAIL README: the badges block differs from badges.toml; run: python .github/badges/badges.py write")
         ok = False
     for badge in number_badges(spec):
-        result = evaluate(badge, text, require_re2)
+        path = source(spec, badge)
+        if path not in sources:
+            result = Result(badge["label"], None, [f"{path} does not exist"])
+        else:
+            result = evaluate(badge, sources[path], require_re2, path)
         if result.problems:
             ok = False
             print(f"FAIL {result.label}")
@@ -262,10 +288,13 @@ def fetch(url: str, attempts: int = 3) -> str:
 
 def live(spec: dict, ref: str) -> bool:
     """Compare img.shields.io's rendering at `ref` with this module's; a commit's raw file is not cached stale."""
-    text = fetch(raw_url(spec, ref)).replace("\r\n", "\n")
+    texts: dict = {}
     ok = True
     for badge in number_badges(spec):
-        expected = evaluate(badge, text)
+        path = source(spec, badge)
+        if path not in texts:
+            texts[path] = fetch(raw_url(spec, ref, path)).replace("\r\n", "\n")
+        expected = evaluate(badge, texts[path], where=path)
         title = re.search(r"<title>(.*?)</title>", fetch(regex_url(spec, badge, ref)), re.S)
         shown = html.unescape(title.group(1)) if title else "(no title in the SVG)"
         wanted = f"{badge['label']}: {expected.message}" if expected.message else None
@@ -288,16 +317,16 @@ def main(argv: list | None = None) -> int:
     check_cmd.add_argument("--require-re2", action="store_true", help="fail when google-re2 is not installed")
     commands.add_parser("write", help="regenerate the badge block in README.md, then check")
     live_cmd = commands.add_parser("live", help="compare img.shields.io's rendering at a commit")
-    live_cmd.add_argument("--ref", required=True, help="commit (or branch) whose README.md to render")
+    live_cmd.add_argument("--ref", required=True, help="commit (or branch) whose files to render")
     args = parser.parse_args(argv)
 
     spec = load_spec()
     readme = ROOT / spec["readme"]
     if args.command == "write":
         write(spec, readme)
-        ok = check(spec, read_text(readme))
+        ok = check(spec, read_text(readme), sources=read_sources(spec))
     elif args.command == "check":
-        ok = check(spec, read_text(readme), args.require_re2)
+        ok = check(spec, read_text(readme), args.require_re2, read_sources(spec))
     else:
         ok = live(spec, args.ref)
     return 0 if ok else 1
