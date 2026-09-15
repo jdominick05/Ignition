@@ -2,7 +2,7 @@
 
 State of `main` on 2026-09-14 (version 0.3.1). Measured figures name the commit whose message records the run;
 Ignition does not track benchmark logs (`results/` is gitignored). How the pipeline works is in the
-[README](README.md#how-a-frame-runs).
+[performance notes](docs/PERFORMANCE.md#how-a-frame-runs).
 
 ## Completed
 
@@ -12,7 +12,7 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   backend; q, ESC, closing the window, Ctrl+C and Ctrl+Break release the camera, window and NPU and exit 0.
 - [x] **Live detection on silicon** (`ee66fbd`, `8ffa482`): 7.82–8.03 ms mean G2G at 5.0–5.9 objects per
   frame, resident memory −1.15 to +0.02 MB over 500 frames, and `bus.jpg` boxes matching ONNX Runtime (mIoU
-  0.977). Every run is in the [README](README.md#performance).
+  0.977). Every run is in the [performance notes](docs/PERFORMANCE.md#yolov8n-through-live_ignitionpy).
 - [x] **CLI on `.ignite`** (`ee66fbd`): `ignition detect`, including `--stream --benchmark`.
 - [x] **Consumer README** (`d42d33e`, `e3a6fcf`): same-sitting comparison with AMD's stack and a compatibility
   matrix.
@@ -25,7 +25,7 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
 - [x] **Camera rate:** the webcam's auto exposure sets its rate, not the backend or pixel format: 30 distinct fps
   in a bright room, 15 in a dim one. `live_ignition.py` reports the read and distinct rate and takes
   `--camera-backend`; `--exposure-priority off` holds 30 fps in dim light, with a darker image and fewer detections.
-- [x] **Install from a release:** the README's Install section gives the release page's pip commands beside the
+- [x] **Install from a release:** the [usage notes](docs/USAGE.md#other-ways-to-install) give the release page's pip commands beside the
   editable checkouts, and both commands work from wheels downloaded from the v0.3.1 release into fresh
   environments.
 - [x] **Python coverage:** the CPU install from source passes on Python 3.10, 3.11, 3.12 and 3.13. The NPU path
@@ -43,11 +43,11 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
 - [x] **Model zoo in `live_ignition.py`:** `--task` serves detection, classification and super-resolution models,
   reading the task from the container manifest or the ONNX outputs by default, and `--json` writes each run's
   summary. With ignite-xdna `68c2fea` on `bus.jpg`, YOLOv8s ran at 17.22 ms and SESR M7 at 6.59 ms mean
-  glass-to-glass on the NPU, and ResNet50 classified on the CPU at 30.49 ms ([README](README.md#other-models)).
+  glass-to-glass on the NPU, and ResNet50 classified on the CPU at 30.49 ms ([performance notes](docs/PERFORMANCE.md#other-models)).
 - [x] **Suite runner in Ignition:** `ignition suite MODEL...` runs each model in its own `ignition.live` process
   and writes one JSON record and log per model plus an index, refusing an existing output directory. The app
   moved into the package as `ignition.live`; `live_ignition.py` launches it from a checkout
-  ([README](README.md#6-compare-models-in-one-command)).
+  ([usage notes](docs/USAGE.md#6-compare-models-in-one-command)).
 - [x] **ignite-xdna's suites on `ignition suite`** (ignite-xdna `373d897`): `tools/model_zoo_bench.py` hands its
   presets to `ignition suite`, writes each run's records into a new `results/model_zoo/<suite>_<UTC time>/`
   directory, and rewrites its JSON and `docs/MODEL_ZOO_BENCHMARKS.md`'s tables only when every run is clean. The
@@ -57,7 +57,7 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   ONNX Runtime's CPU provider between them, with all 84 layers exact on Device 0. In one sitting on `bus.jpg`,
   `live_ignition.py` took 10.996 and 11.048 ms mean glass-to-glass (NPU dispatch 8.45 ms, attention block
   1.69 ms, reported as the `host` stage). AMD's stack took 34.492 and 34.366 ms, and ONNX Runtime's CPU provider
-  31.328 ms (ignite-xdna `results/aie/yolo11n_hybrid_phoenix_20260915T0216Z.log`, [README](README.md#yolo11n-with-its-attention-block)).
+  31.328 ms (ignite-xdna `results/aie/yolo11n_hybrid_phoenix_20260915T0216Z.log`, [performance notes](docs/PERFORMANCE.md#yolo11n-with-its-attention-block)).
 - [x] **YOLO11n's attention-block convolutions on the NPU** (ignite-xdna `d223e7b`): the CPU step keeps only the attention
   core (two matrix multiplies and a softmax); the block's seven convolutions and residual adds run on the NPU, all 91
   layers exact on Device 0. In one sitting, 500 frames each, the attention-core container took 10.411 and 10.115 ms
@@ -75,6 +75,18 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   both projects, and builds one environment with mlir-aie 1.4.2 and llvm-aie. Installed from local branches into a
   scratch folder, its printed instructions compiled YOLOv8n in 13.2 s and ran `bus.jpg` at 7.886 ms mean
   glass-to-glass, 5 detections per frame; a second run updated the checkouts in place.
+- [x] **README walkthrough and model tools** (recorded in the commit that adds this entry): the README takes a user
+  from `install.ps1` to a running container in 224 words of prose, held to 250 by `.github/checks/readme_words.py`;
+  measurements moved to `docs/PERFORMANCE.md` and reference to `docs/USAGE.md`. `install.ps1` also builds a Python
+  3.12 environment with AMD Quark 0.11.2, Ultralytics 8.4.153 and the Hugging Face CLI. Typed into one PowerShell
+  window on a scratch install, the README's commands downloaded YOLOv8n from Hugging Face, exported and cut it,
+  calibrated it on coco128 (304 s, 13.5 GB of temporary disk), compiled it in 13.0 s and ran `bus.jpg` at 7.730 ms
+  mean glass-to-glass; the container matched its model on 66/66 layers.
+- [x] **Badges against AMD's stack** (recorded in the commit that adds this entry): every number badge compares
+  Ignition with AMD's stack and reads `docs/PERFORMANCE.md`, including the models Ignition loses, which mark where it
+  needs work. In one sitting AMD's stack took 16.954 and 16.958 ms on YOLOv8s against Ignition's 17.240 and 17.265 ms,
+  and 3.654 and 3.632 ms on SESR M7 against 6.671 and 6.662 ms (ignite-xdna
+  `results/aie/yolov8s_sesr_vs_amd_phoenix_20260915T2146Z.log`).
 
 ## Active
 
@@ -134,12 +146,12 @@ On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.6
     under `src/`, `tools/`, `npu/` and `kernels/` carry Apache-2.0 SPDX headers, 2 carry MIT, and `engine.cc`
     carries none.
   - **Portability is unrecorded.** The manifest pins kernel and xclbin hashes but no NPU driver or XRT version,
-    and the only verified setup is the one in the README's [Compatibility](README.md#compatibility) table.
+    and the only verified setup is the one in the usage notes' [Compatibility](docs/USAGE.md#compatibility) table.
 - [ ] The published v0.2.0 notes still quote the figures v0.3.1 corrects. Decide whether to edit them.
 
 ### 3. Hardware coverage
 
-Only Phoenix on Windows 11 is verified ([README](README.md#compatibility)).
+Only Phoenix on Windows 11 is verified ([usage notes](docs/USAGE.md#compatibility)).
 
 - [ ] Run the `.ignite` path on a Hawk Point NPU (same XDNA1 generation) and record it before calling it
   supported.
@@ -147,9 +159,13 @@ Only Phoenix on Windows 11 is verified ([README](README.md#compatibility)).
 ### 4. NPU dispatch time (ignite-xdna)
 
 AMD's NPU stage is about 0.7 ms faster than Ignition's on the same model and image in the
-[README](README.md#ignition-vs-amds-ryzen-ai-stack)'s same-sitting comparison (0.8 ms in `d42d33e`). Most of
+[performance notes](docs/PERFORMANCE.md#ignition-vs-amds-ryzen-ai-stack)' same-sitting comparison (0.8 ms in `d42d33e`). Most of
 Ignition's dispatch is activations moving between host memory and the NPU: 5.37 ms of a 7.39 ms dispatch with
 every weight operation switched off (ignite-xdna `results/model_zoo/dispatch_floor_yolov8n_full.json`).
+
+The gap is wider on other models. In one sitting AMD's `session.run` took 13.14–13.17 ms on YOLOv8s against Ignition's
+16.70–16.74 ms dispatch, and 1.46–1.47 ms on SESR M7 against 4.39–4.41 ms, so AMD's stack is faster end to end on
+both: 16.95–16.96 against 17.24–17.27 ms, and 3.63–3.65 against 6.66–6.67 ms ([performance notes](docs/PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)).
 
 - [ ] Keep activations on the NPU between layers in ignite-xdna (SESR M7's target needs the same change),
   then re-run the AMD comparison in one sitting.

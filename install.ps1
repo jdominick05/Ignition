@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 <#
 .SYNOPSIS
-    Install or update Ignition, ignite-xdna and the NPU compiler toolchain on Windows 11 with an AMD Phoenix NPU.
+    Install or update Ignition, ignite-xdna, the NPU compiler toolchain and the model-building tools on Windows 11
+    with an AMD Phoenix NPU.
 
 .DESCRIPTION
     Paste into PowerShell:
@@ -16,20 +17,30 @@
     Run it again at any time to update. It
       1. checks for AMD's NPU driver and, with -InstallDriver, installs AMD's production driver,
       2. finds 64-bit CPython 3.13, or installs it for the current user with winget,
-      3. finds Git, or installs it with winget,
-      4. installs the XRT SDK 2.21.75 into C:\Xilinx\XRT\xrt_sdk, where ignite-xdna loads pyxrt from,
-      5. clones ignite-xdna and Ignition under <InstallRoot>\src, or fast-forwards them,
-      6. creates <InstallRoot>\venv with mlir-aie 1.4.2, llvm-aie (Peano) and both projects,
-      7. writes <InstallRoot>\ignition-env.ps1, which sets up a PowerShell session to compile and run models,
-      8. checks that the toolchain imports, xclbinutil is found and Ignition sees the NPU.
-    It writes nothing outside <InstallRoot> and C:\Xilinx\XRT\xrt_sdk, apart from what winget and AMD's driver
-    installer do.
+      3. finds 64-bit CPython 3.12 for the model tools, or installs it for the current user with winget,
+      4. finds Git, or installs it with winget,
+      5. installs the XRT SDK 2.21.75 into C:\Xilinx\XRT\xrt_sdk, where ignite-xdna loads pyxrt from,
+      6. clones ignite-xdna and Ignition under <InstallRoot>\src, or fast-forwards them,
+      7. creates <InstallRoot>\venv (Python 3.13) with mlir-aie 1.4.2, llvm-aie (Peano) and both projects,
+      8. creates <InstallRoot>\venv-models (Python 3.12) with AMD Quark, Ultralytics and the Hugging Face CLI,
+      9. writes <InstallRoot>\ignition-models.ps1 and ignition-env.ps1, which set up a PowerShell session to build
+         models, and to compile and run them,
+     10. checks that both environments import, xclbinutil is found and Ignition sees the NPU.
+    Steps 3 and 8 are skipped with -SkipModelTools. It writes nothing outside <InstallRoot> and
+    C:\Xilinx\XRT\xrt_sdk, apart from what winget and AMD's driver installer do.
 
 .PARAMETER InstallRoot
-    Where the sources, the Python environment and downloads go. Default: %LOCALAPPDATA%\Ignition.
+    Where the sources, the Python environments and downloads go. Default: %LOCALAPPDATA%\Ignition.
 
 .PARAMETER Python
-    A 64-bit CPython 3.13 python.exe to build the environment from, instead of searching for or installing one.
+    A 64-bit CPython 3.13 python.exe to build the NPU environment from, instead of searching for or installing one.
+
+.PARAMETER ModelPython
+    A 64-bit CPython 3.12 python.exe to build the model-building environment from. AMD Quark 0.11.2 needs Python 3.12
+    or older.
+
+.PARAMETER SkipModelTools
+    Do not install Python 3.12 or the model-building environment (for running and compiling ready-made models only).
 
 .PARAMETER InstallDriver
     When the NPU driver is missing or older than 32.0.20101.3760, download AMD's production driver package and run
@@ -55,6 +66,8 @@
 param(
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'Ignition'),
     [string]$Python = '',
+    [string]$ModelPython = '',
+    [switch]$SkipModelTools,
     [switch]$InstallDriver,
     [switch]$ReinstallXrt,
     [string]$IgniteXdnaRepo = 'https://github.com/jdominick05/ignite-xdna.git',
@@ -84,7 +97,10 @@ param(
     $MlirAie = @('mlir_aie==1.4.2', 'https://github.com/Xilinx/mlir-aie/releases/expanded_assets/v1.4.2')
     $LlvmAie = @('llvm-aie==22.0.0.2026090201+a36c62b9', 'https://github.com/Xilinx/llvm-aie/releases/expanded_assets/nightly')
     $Eudsl = @('eudsl-python-extras==0.1.0.20260801.905+68a0d7a', 'https://llvm.github.io/eudsl')
-    $StepCount = 8
+    # Export (Ultralytics), quantization (AMD Quark's XINT8) and the Hugging Face CLI. Quark 0.11.2 only warns when it
+    # cannot build its C++ custom ops, which XINT8 does not use; Quark 0.12 stops at import without a C++ compiler.
+    $ModelTools = @('amd-quark==0.11.2', 'ultralytics==8.4.153', 'torch==2.14.0', 'onnxruntime==1.30.0', 'huggingface_hub==1.31.0')
+    $StepCount = if ($SkipModelTools) { 8 } else { 10 }
     $state = @{ Step = 0 }
 
     function Write-Step([string]$Text) {
@@ -125,30 +141,43 @@ param(
         return $null
     }
 
-    function Test-Python313([string]$Path) {
+    function Test-Python([string]$Path, [string]$Minor) {
         if (-not $Path -or -not (Test-Path $Path)) { return $false }
         $version = & $Path -c "import struct, sys; print('%d.%d-%d' % (sys.version_info[0], sys.version_info[1], struct.calcsize('P') * 8))"
-        return ($LASTEXITCODE -eq 0 -and "$version".Trim() -eq '3.13-64')
+        return ($LASTEXITCODE -eq 0 -and "$version".Trim() -eq "3.$Minor-64")
     }
 
-    function Find-Python313([string]$Explicit) {
+    function Find-Python([string]$Explicit, [string]$Minor, [string]$Option) {
         if ($Explicit) {
-            if (Test-Python313 $Explicit) { return (Resolve-Path $Explicit).Path }
-            throw "-Python $Explicit is not a 64-bit CPython 3.13."
+            if (Test-Python $Explicit $Minor) { return (Resolve-Path $Explicit).Path }
+            throw "$Option $Explicit is not a 64-bit CPython 3.$Minor."
         }
         $candidates = @()
         $launcher = Get-Command py.exe -ErrorAction SilentlyContinue
         if ($launcher) {
             foreach ($line in @(& $launcher.Source -0p)) {
-                if ("$line" -match '3\.13\S*\s+\*?\s*(\S.*python\.exe)\s*$') { $candidates += $Matches[1] }
+                if ("$line" -match "3\.$Minor\S*\s+\*?\s*(\S.*python\.exe)\s*$") { $candidates += $Matches[1] }
             }
         }
-        $candidates += (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python313\python.exe')
-        $candidates += (Join-Path $env:ProgramFiles 'Python313\python.exe')
+        $candidates += (Join-Path $env:LOCALAPPDATA "Programs\Python\Python3$Minor\python.exe")
+        $candidates += (Join-Path $env:ProgramFiles "Python3$Minor\python.exe")
         foreach ($candidate in $candidates) {
-            if (Test-Python313 $candidate) { return $candidate }
+            if (Test-Python $candidate $Minor) { return $candidate }
         }
         return $null
+    }
+
+    function Get-Python([string]$Explicit, [string]$Minor, [string]$Option) {
+        $found = Find-Python $Explicit $Minor $Option
+        if (-not $found) {
+            Install-WithWinget "Python.Python.3.$Minor" @('--scope', 'user')
+            $found = Find-Python '' $Minor $Option
+            if (-not $found) {
+                throw "Python 3.$Minor was not found after winget ran. Install 64-bit Python 3.$Minor from python.org, then run this again with $Option <path to python.exe>."
+            }
+        }
+        Write-Note "using $found"
+        return $found
     }
 
     function Find-Git {
@@ -201,6 +230,19 @@ param(
         Write-Note "$(Split-Path $Directory -Leaf) at $head"
     }
 
+    function New-Venv([string]$Base, [string]$Venv, [string]$Minor) {
+        $venvPython = Join-Path $Venv 'Scripts\python.exe'
+        if ((Test-Path $venvPython) -and -not (Test-Python $venvPython $Minor)) {
+            Write-Note "recreating $Venv, which is not Python 3.$Minor"
+            Remove-Item -Recurse -Force $Venv -ErrorAction Stop
+        }
+        if (-not (Test-Path $venvPython)) {
+            & $Base -m venv $Venv
+            Assert-Exit "Creating $Venv"
+        }
+        return $venvPython
+    }
+
     function Repair-LlvmAie([string]$Venv) {
         # The published Windows llvm-aie wheel needs what mlir-aie's utils/iron_setup.py does after installing it:
         # GNU-style libc.a and libm.a names, and no .deplibs section in crt1.o. Both steps are idempotent.
@@ -222,6 +264,20 @@ param(
             }
         }
         Write-Note "prepared $($toolchains.Count) llvm-aie toolchains"
+    }
+
+    function Write-SessionScript([string]$Path, [string]$Purpose, [string]$Venv, [string]$SessionPath, [string]$Location) {
+        $lines = @(
+            '# Written by Ignition''s install.ps1, which rewrites it on every run.',
+            "# Sets up this PowerShell session to $Purpose.",
+            ('$env:IGNITION_HOME = ' + (ConvertTo-Quoted $InstallRoot)),
+            ('$env:VIRTUAL_ENV = ' + (ConvertTo-Quoted $Venv)),
+            ('$env:PATH = ' + (ConvertTo-Quoted "$SessionPath;") + ' + $env:PATH'),
+            ('Set-Location ' + (ConvertTo-Quoted $Location)),
+            ('Write-Host "Ready to ' + $Purpose + ' in $(Get-Location)"')
+        )
+        Set-Content -Path $Path -Value $lines -Encoding UTF8 -ErrorAction Stop
+        Write-Note "wrote $Path"
     }
 
     Write-Host "Ignition installer -> $InstallRoot" -ForegroundColor Green
@@ -257,15 +313,12 @@ param(
     }
 
     Write-Step 'Python 3.13'
-    $pythonExe = Find-Python313 $Python
-    if (-not $pythonExe) {
-        Install-WithWinget 'Python.Python.3.13' @('--scope', 'user')
-        $pythonExe = Find-Python313 ''
-        if (-not $pythonExe) {
-            throw 'Python 3.13 was not found after winget ran. Install 64-bit Python 3.13 from python.org, then run this again with -Python <path to python.exe>.'
-        }
+    $pythonExe = Get-Python $Python '13' '-Python'
+
+    if (-not $SkipModelTools) {
+        Write-Step 'Python 3.12 for the model tools'
+        $modelBase = Get-Python $ModelPython '12' '-ModelPython'
     }
-    Write-Note "using $pythonExe"
 
     Write-Step 'Git'
     $git = Find-Git
@@ -310,18 +363,11 @@ param(
     Sync-Repository $git $IgniteXdnaRepo $IgniteXdnaBranch $igniteXdna
     Sync-Repository $git $IgnitionRepo $IgnitionBranch $ignition
 
-    Write-Step 'Python environment and NPU compiler toolchain'
-    $venv = Join-Path $InstallRoot 'venv'
-    $venvPython = Join-Path $venv 'Scripts\python.exe'
-    if ((Test-Path $venvPython) -and -not (Test-Python313 $venvPython)) {
-        Write-Note "recreating $venv, which is not Python 3.13"
-        Remove-Item -Recurse -Force $venv -ErrorAction Stop
-    }
-    if (-not (Test-Path $venvPython)) {
-        & $pythonExe -m venv $venv
-        Assert-Exit 'Creating the Python environment'
-    }
     $pip = @('-m', 'pip', 'install', '--disable-pip-version-check')
+
+    Write-Step 'Python 3.13 environment and NPU compiler toolchain'
+    $venv = Join-Path $InstallRoot 'venv'
+    $venvPython = New-Venv $pythonExe $venv '13'
     & $venvPython @pip --upgrade pip
     Assert-Exit 'Upgrading pip'
     & $venvPython @pip aiofiles rich 'ml_dtypes>=0.5.4' cloudpickle 'numpy>=2.5.1,<3.0'
@@ -336,22 +382,28 @@ param(
     & $venvPython @pip -e $igniteXdna -e $ignition
     Assert-Exit 'Installing ignite-xdna and Ignition'
 
-    Write-Step 'Session setup script'
-    # The Python environment's scripts, and the XRT SDK root for xclbinutil, which aiecc runs to write the xclbin.
-    # ignite-xdna finds pyxrt and the XRT DLLs itself, so running a container needs nothing more.
+    $modelVenv = Join-Path $InstallRoot 'venv-models'
+    if (-not $SkipModelTools) {
+        Write-Step 'Python 3.12 environment for exporting and quantizing models'
+        $modelPythonExe = New-Venv $modelBase $modelVenv '12'
+        & $modelPythonExe @pip --upgrade pip
+        Assert-Exit 'Upgrading pip in the model environment'
+        & $modelPythonExe @pip @ModelTools
+        Assert-Exit 'Installing AMD Quark, Ultralytics and the Hugging Face CLI'
+    }
+
+    Write-Step 'Session setup scripts'
+    # The NPU session: the Python 3.13 environment's scripts, and the XRT SDK root for xclbinutil, which aiecc runs to
+    # write the xclbin. ignite-xdna finds pyxrt and the XRT DLLs itself, so running a container needs nothing more.
     $sessionPath = "$venv\Scripts;$XrtRoot"
     $envScript = Join-Path $InstallRoot 'ignition-env.ps1'
-    $lines = @(
-        '# Written by Ignition''s install.ps1, which rewrites it on every run.',
-        '# Sets up this PowerShell session to compile models with ignite-compile and run them with Ignition.',
-        ('$env:IGNITION_HOME = ' + (ConvertTo-Quoted $InstallRoot)),
-        ('$env:VIRTUAL_ENV = ' + (ConvertTo-Quoted $venv)),
-        ('$env:PATH = ' + (ConvertTo-Quoted "$sessionPath;") + ' + $env:PATH'),
-        ('Set-Location ' + (ConvertTo-Quoted $ignition)),
-        'Write-Host "Ignition session ready in $(Get-Location)"'
-    )
-    Set-Content -Path $envScript -Value $lines -Encoding UTF8 -ErrorAction Stop
-    Write-Note "wrote $envScript"
+    Write-SessionScript $envScript 'compile and run models with Ignition' $venv $sessionPath $ignition
+    # The model session: Python 3.12 with Quark (which also needs its ninja.exe on PATH), in ignite-xdna, whose
+    # pipeline scripts read and write models\ and data\ under the checkout.
+    $modelsScript = Join-Path $InstallRoot 'ignition-models.ps1'
+    if (-not $SkipModelTools) {
+        Write-SessionScript $modelsScript 'download, export and quantize models' $modelVenv "$modelVenv\Scripts" $igniteXdna
+    }
 
     Write-Step 'Checks'
     $savedPath = $env:PATH
@@ -367,6 +419,10 @@ param(
         $devicesExit = $LASTEXITCODE
         foreach ($line in $devices) { Write-Note "$line" }
         $npuSeen = ($devicesExit -eq 0) -and (($devices -join "`n") -match 'NPU Phoenix')
+        if (-not $SkipModelTools) {
+            & $modelPythonExe -c "import quark, ultralytics, onnxruntime, huggingface_hub; print('      quark', quark.__version__, 'and ultralytics', ultralytics.__version__, 'import')"
+            Assert-Exit 'Importing the model tools'
+        }
     }
     finally {
         $env:PATH = $savedPath
@@ -374,10 +430,13 @@ param(
     if (-not $npuSeen) { Write-Warn 'Ignition did not list a Phoenix NPU: check the driver step above. Models still compile.' }
 
     Write-Host ''
-    Write-Host 'Ignition is installed. In each new PowerShell window, set up the session:' -ForegroundColor Green
+    if ($SkipModelTools) {
+        Write-Host 'Ignition is installed. Follow the README from "Compile and run". Each PowerShell window starts with:' -ForegroundColor Green
+    } else {
+        Write-Host 'Ignition is installed. Follow the README from "Get a model". Each PowerShell window starts with one of:' -ForegroundColor Green
+        Write-Host '  to download, export and quantize a model:'
+        Write-Host "    Set-ExecutionPolicy Bypass -Scope Process -Force; . $(ConvertTo-Quoted $modelsScript)"
+    }
+    Write-Host '  to compile and run a model:'
     Write-Host "    Set-ExecutionPolicy Bypass -Scope Process -Force; . $(ConvertTo-Quoted $envScript)"
-    Write-Host 'Compile a model (AMD Quark XINT8, detection head cut; see the README):'
-    Write-Host "    ignite-compile --engine graph --input C:\path\to\yolov8n_cut_xint8.onnx --output $(ConvertTo-Quoted "$igniteXdna\build\yolov8n_full.ignite")"
-    Write-Host 'Run it on webcam 0 (q or Esc quits):'
-    Write-Host '    python live_ignition.py'
 }
