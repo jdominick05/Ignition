@@ -84,6 +84,7 @@ A window opens on webcam 0 with boxes, labels and latency; press q to quit. Add 
 
 - [Performance against AMD's stack](docs/PERFORMANCE.md)
 - [Other models, flags, Python API and limitations](docs/USAGE.md)
+- [Designing and quantizing models for this NPU](docs/QUANTIZATION-GUIDE.md)
 - [Open work](TODO.md)
 
 Licensed under [AGPL-3.0-or-later](LICENSE).
