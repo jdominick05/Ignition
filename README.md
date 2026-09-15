@@ -12,10 +12,21 @@
 
 **Real-time object detection on the AMD Ryzen™ AI NPU: faster end to end than AMD's own runtime, from a fraction of the install size.**
 
+<!-- badges:start: generated from .github/badges/badges.toml by .github/badges/badges.py -->
 ![NPU: AMD Phoenix XDNA1](https://img.shields.io/badge/NPU-AMD%20Phoenix%20XDNA1-ed1c24)
-![YOLOv8n: about 8 ms per frame](https://img.shields.io/badge/YOLOv8n-~8%20ms%20per%20frame-brightgreen)
+[![Latest release](https://img.shields.io/github/v/release/jdominick05/Ignition)](https://github.com/jdominick05/Ignition/releases/latest)
 ![Verified on Ryzen 7 8700G](https://img.shields.io/badge/verified-Ryzen%207%208700G-blue)
 ![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)
+
+[![YOLOv8n end-to-end latency per frame through Ignition and AMD's stack, both runs](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjdominick05%2FIgnition%2Fmain%2FREADME.md&search=%5C%7C%20%5C%2A%2AEnd-to-end%20latency%2C%20mean%5C%2A%2A%20%5C%7C%20%5C%2A%2A%28%5B0-9.%5D%2B%29%20%2F%20%28%5B0-9.%5D%2B%29%20ms%5C%2A%2A%20%5C%7C%20%5C%2A%2A%28%5B0-9.%5D%2B%29%20%2F%20%28%5B0-9.%5D%2B%29%20ms&replace=%241%20%2F%20%242%20ms%20vs%20AMD%20%243%20%2F%20%244%20ms&label=YOLOv8n%20per%20frame&color=brightgreen)](#ignition-vs-amds-ryzen-ai-stack)
+[![YOLO11n latency per frame through Ignition and AMD's stack, both runs](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjdominick05%2FIgnition%2Fmain%2FREADME.md&search=%23%23%23%20YOLO11n%20with%20its%20attention%20block%28%3Fs%3A.%2A%3F%29%5C%7C%201%20%5C%7C%20AMD%5B%5E%7C%5D%2A%5C%7C%20%5C%2A%2A%28%5B0-9.%5D%2B%29%20ms%28%3Fs%3A.%2A%3F%29%5C%7C%203%20%5C%7C%20Ignition%2C%20attention%20core%20on%20the%20CPU%20%5C%7C%20%5C%2A%2A%28%5B0-9.%5D%2B%29%20ms%28%3Fs%3A.%2A%3F%29%5C%7C%204%20%5C%7C%20AMD%5B%5E%7C%5D%2A%5C%7C%20%5C%2A%2A%28%5B0-9.%5D%2B%29%20ms%28%3Fs%3A.%2A%3F%29%5C%7C%206%20%5C%7C%20Ignition%2C%20attention%20core%20on%20the%20CPU%20%5C%7C%20%5C%2A%2A%28%5B0-9.%5D%2B%29%20ms&replace=%242%20%2F%20%244%20ms%20vs%20AMD%20%241%20%2F%20%243%20ms&label=YOLO11n%20per%20frame&color=brightgreen)](#yolo11n-with-its-attention-block)
+[![YOLOv8n-pose latency per frame through Ignition, both runs](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjdominick05%2FIgnition%2Fmain%2FREADME.md&search=%23%23%23%20YOLOv8n-pose%20on%20the%20NPU%28%3Fs%3A.%2A%3F%29%5C%7C%203%20%5C%7C%20Ignition%20on%20the%20container%20%5C%7C%20%5C%2A%2A%28%5B0-9.%5D%2B%29%20ms%28%3Fs%3A.%2A%3F%29%5C%7C%206%20%5C%7C%20Ignition%20on%20the%20container%20%5C%7C%20%5C%2A%2A%28%5B0-9.%5D%2B%29%20ms&replace=%241%20%2F%20%242%20ms&label=YOLOv8n-pose%20per%20frame&color=brightgreen)](#yolov8n-pose-on-the-npu)
+[![YOLOv8n-pose keypoint accuracy on COCO val2017 through the container](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjdominick05%2FIgnition%2Fmain%2FREADME.md&search=on%20all%205%2C000%20COCO%20val2017%20images%20the%20container%20scored%20%28%5B0-9.%5D%2B%29%20OKS%20mAP%4050-95&replace=%241%20OKS%20mAP%4050-95&label=YOLOv8n-pose%20COCO%20keypoints&color=blue)](#yolov8n-pose-on-the-npu)
+[![YOLOv8s latency per frame on the NPU](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjdominick05%2FIgnition%2Fmain%2FREADME.md&search=%5C%7C%20YOLOv8s%20%5C%7C%20detect%20%5C%7C%20NPU%20%5C%7C%20%5C%2A%2A%28%5B0-9.%5D%2B%29%20ms&replace=%241%20ms&label=YOLOv8s%20per%20frame&color=brightgreen)](#other-models)
+[![SESR M7 super-resolution latency per frame on the NPU](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjdominick05%2FIgnition%2Fmain%2FREADME.md&search=%5C%7C%20SESR%20M7%20%5C%7C%20super_resolution%20%5C%7C%20NPU%20%5C%7C%20%5C%2A%2A%28%5B0-9.%5D%2B%29%20ms&replace=%241%20ms&label=SESR%20M7%20per%20frame&color=brightgreen)](#other-models)
+[![Resident memory through Ignition and AMD's stack, both runs](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjdominick05%2FIgnition%2Fmain%2FREADME.md&search=%5C%7C%20%5C%2A%2AProcess%20memory%20%5C%28RSS%5C%29%5C%2A%2A%20%5C%7C%20%5C%2A%2A%28%5B0-9.%5D%2B%29%20%2F%20%28%5B0-9.%5D%2B%29%20MB%5C%2A%2A%20%5C%7C%20%5C%2A%2A%28%5B0-9.%5D%2B%29%20%2F%20%28%5B0-9.%5D%2B%29%20MB&replace=%241%20%2F%20%242%20MB%20vs%20AMD%20%243%20%2F%20%244%20MB&label=memory%20%28RSS%29&color=blue)](#ignition-vs-amds-ryzen-ai-stack)
+[![Runtime install size on disk, Ignition and AMD's stack](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjdominick05%2FIgnition%2Fmain%2FREADME.md&search=%5C%7C%20%5C%2A%2ARuntime%20install%20on%20disk%5C%2A%2A%20%5C%7C%20%5C%2A%2A%28%5B%5E0-9%7C%20%2A%5D%2A%29%28%5B0-9%2C%5D%2B%29%20MB%5C%2A%2A%20%5C%7C%20%5C%2A%2A%28%5B%5E0-9%7C%20%2A%5D%2A%29%28%5B0-9%2C%5D%2B%29%20MB&replace=%241%242%20MB%20vs%20AMD%20%243%244%20MB&label=runtime%20install&color=blue)](#ignition-vs-amds-ryzen-ai-stack)
+<!-- badges:end -->
 
 Ignition runs YOLOv8n object detection on the NPU built into AMD Ryzen AI processors. All 66 layers of the network run on the NPU, not your CPU. Point it at a webcam and each captured frame becomes labelled boxes in about 8 milliseconds.
 
@@ -339,6 +350,7 @@ Open work is tracked in [TODO.md](TODO.md).
 
 ```
 Ignition/
+├── .github/                   # README badges: badges.toml, badges.py, and the workflow that checks them
 ├── live_ignition.py           # launches ignition.live from this checkout
 ├── src/ignition/
 │   ├── __init__.py            # compile(), devices()

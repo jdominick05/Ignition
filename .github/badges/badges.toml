@@ -1,0 +1,116 @@
+# README badges. Edit this file, then run `python .github/badges/badges.py write` to regenerate the block between the
+# badges markers in README.md; `python .github/badges/badges.py check` verifies it, and so does the README badges
+# workflow on every push.
+#
+# A badge with `search` is a dynamic img.shields.io badge. Each time it is fetched, img.shields.io runs `search` (RE2)
+# over README.md on `branch` and renders `replace`, where $1, $2, ... are the pattern's groups. Its number is the one
+# the README's own table states, so a push to GitHub that changes that number changes the badge, once img.shields.io's
+# 2-minute and GitHub's 5-minute caches expire (their Cache-Control on 2026-09-15). `section` is the heading the match
+# must stay inside. `check` fails unless the pattern matches exactly once there with the same groups under Python's re
+# and RE2, so a README edit that would leave a badge reading "no result", or reading another row's number, fails the
+# check instead. Keep label, search and replace ASCII, and use only $1, $2, ... in replace.
+#
+# A badge with `message` is static; one with `image` uses that image URL as it is. `row` groups badges into lines.
+
+repository = "jdominick05/Ignition"
+branch = "main"
+readme = "README.md"
+
+[[badge]]
+row = 1
+alt = "NPU: AMD Phoenix XDNA1"
+label = "NPU"
+message = "AMD Phoenix XDNA1"
+color = "ed1c24"
+
+[[badge]]
+row = 1
+alt = "Latest release"
+image = "https://img.shields.io/github/v/release/jdominick05/Ignition"
+link = "https://github.com/jdominick05/Ignition/releases/latest"
+
+[[badge]]
+row = 1
+alt = "Verified on Ryzen 7 8700G"
+label = "verified"
+message = "Ryzen 7 8700G"
+color = "blue"
+
+[[badge]]
+row = 1
+alt = "License: AGPL-3.0-or-later"
+label = "license"
+message = "AGPL-3.0-or-later"
+color = "blue"
+
+[[badge]]
+row = 2
+alt = "YOLOv8n end-to-end latency per frame through Ignition and AMD's stack, both runs"
+label = "YOLOv8n per frame"
+section = "Ignition vs AMD's Ryzen AI stack"
+search = '\| \**End-to-end latency, mean\** \| \**([0-9.]+) / ([0-9.]+) ms\** \| \**([0-9.]+) / ([0-9.]+) ms'
+replace = "$1 / $2 ms vs AMD $3 / $4 ms"
+color = "brightgreen"
+
+[[badge]]
+row = 2
+alt = "YOLO11n latency per frame through Ignition and AMD's stack, both runs"
+label = "YOLO11n per frame"
+section = "YOLO11n with its attention block"
+search = '### YOLO11n with its attention block(?s:.*?)\| 1 \| AMD[^|]*\| \**([0-9.]+) ms(?s:.*?)\| 3 \| Ignition, attention core on the CPU \| \**([0-9.]+) ms(?s:.*?)\| 4 \| AMD[^|]*\| \**([0-9.]+) ms(?s:.*?)\| 6 \| Ignition, attention core on the CPU \| \**([0-9.]+) ms'
+replace = "$2 / $4 ms vs AMD $1 / $3 ms"
+color = "brightgreen"
+
+[[badge]]
+row = 2
+alt = "YOLOv8n-pose latency per frame through Ignition, both runs"
+label = "YOLOv8n-pose per frame"
+section = "YOLOv8n-pose on the NPU"
+search = '### YOLOv8n-pose on the NPU(?s:.*?)\| 3 \| Ignition on the container \| \**([0-9.]+) ms(?s:.*?)\| 6 \| Ignition on the container \| \**([0-9.]+) ms'
+replace = "$1 / $2 ms"
+color = "brightgreen"
+
+[[badge]]
+row = 2
+alt = "YOLOv8n-pose keypoint accuracy on COCO val2017 through the container"
+label = "YOLOv8n-pose COCO keypoints"
+section = "YOLOv8n-pose on the NPU"
+search = 'on all 5,000 COCO val2017 images the container scored ([0-9.]+) OKS mAP@50-95'
+replace = "$1 OKS mAP@50-95"
+color = "blue"
+
+[[badge]]
+row = 2
+alt = "YOLOv8s latency per frame on the NPU"
+label = "YOLOv8s per frame"
+section = "Other models"
+search = '\| YOLOv8s \| detect \| NPU \| \**([0-9.]+) ms'
+replace = "$1 ms"
+color = "brightgreen"
+
+[[badge]]
+row = 2
+alt = "SESR M7 super-resolution latency per frame on the NPU"
+label = "SESR M7 per frame"
+section = "Other models"
+search = '\| SESR M7 \| super_resolution \| NPU \| \**([0-9.]+) ms'
+replace = "$1 ms"
+color = "brightgreen"
+
+[[badge]]
+row = 2
+alt = "Resident memory through Ignition and AMD's stack, both runs"
+label = "memory (RSS)"
+section = "Ignition vs AMD's Ryzen AI stack"
+search = '\| \**Process memory \(RSS\)\** \| \**([0-9.]+) / ([0-9.]+) MB\** \| \**([0-9.]+) / ([0-9.]+) MB'
+replace = "$1 / $2 MB vs AMD $3 / $4 MB"
+color = "blue"
+
+[[badge]]
+row = 2
+alt = "Runtime install size on disk, Ignition and AMD's stack"
+label = "runtime install"
+section = "Ignition vs AMD's Ryzen AI stack"
+search = '\| \**Runtime install on disk\** \| \**([^0-9| *]*)([0-9,]+) MB\** \| \**([^0-9| *]*)([0-9,]+) MB'
+replace = "$1$2 MB vs AMD $3$4 MB"
+color = "blue"

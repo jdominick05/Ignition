@@ -1,0 +1,30 @@
+# The README's number badges are img.shields.io regex badges that read README.md on main, so a push that changes a
+# number updates its badge by itself. This workflow publishes nothing: it fails when a README edit would leave a badge
+# reading "no result", or reading a number other than the one its section states.
+name: README badges
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  badges:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install RE2, the regex engine img.shields.io runs
+        run: python -m pip install google-re2==1.1.20251105
+      - name: Badge block matches badges.toml and every pattern finds one number in its section
+        run: python .github/badges/badges.py check --require-re2
+      - name: img.shields.io renders every number badge at this commit
+        if: github.event_name == 'push'
+        run: python .github/badges/badges.py live --ref "${{ github.sha }}"
