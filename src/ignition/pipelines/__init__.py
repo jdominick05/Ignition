@@ -11,15 +11,20 @@ from .vision import (
     Classification,
     ClassificationPipeline,
     ClassificationResult,
+    Person,
+    PosePipeline,
+    PoseResult,
     SuperResolutionPipeline,
     SuperResolutionResult,
     create_pipeline,
+    draw_poses,
     infer_task,
 )
 
 __all__ = [
     "YOLOPipeline", "Detection", "YOLOResult",
     "ClassificationPipeline", "Classification", "ClassificationResult",
+    "PosePipeline", "PoseResult", "Person", "draw_poses",
     "SuperResolutionPipeline", "SuperResolutionResult",
     "TASKS", "create_pipeline", "infer_task",
 ]
