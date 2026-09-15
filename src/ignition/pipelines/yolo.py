@@ -117,6 +117,8 @@ class YOLOResult:
         lines.append(f"  Feature Backbone Inference:   {self.timings_ms.get('backbone_ms', 0.0):.2f} ms")
         if "dispatch_ms" in self.timings_ms:
             lines.append(f"    NPU Dispatch:                {self.timings_ms['dispatch_ms']:.2f} ms")
+            if "host_ms" in self.timings_ms:
+                lines.append(f"    Host Layers (ONNX Runtime):  {self.timings_ms['host_ms']:.2f} ms")
             lines.append(f"    Head Readback:               {self.timings_ms.get('readback_ms', 0.0):.2f} ms")
         lines.append(f"  Head Decode + Per-Class NMS:   {self.timings_ms.get('postprocess_ms', 0.0):.2f} ms")
         lines.append(f"  Total End-to-End Latency:      {self.timings_ms.get('total_ms', 0.0):.2f} ms")
@@ -593,8 +595,13 @@ class YOLOPipeline:
         }
         dispatch_ms = getattr(native.session, "last_dispatch_ms", None)
         if dispatch_ms is not None:
+            # A container with host segments (YOLO11's C2PSA block) runs them on ONNX Runtime's CPU
+            # provider between NPU dispatches; ignite-xdna reports that time apart from the dispatch.
+            host_ms = float(getattr(native.session, "last_host_ms", 0.0) or 0.0)
             timings["dispatch_ms"] = float(dispatch_ms)
-            timings["readback_ms"] = max(hw.npu_forward_ms - float(dispatch_ms), 0.0)
+            if not getattr(native.session, "single_dispatch", True):
+                timings["host_ms"] = host_ms
+            timings["readback_ms"] = max(hw.npu_forward_ms - float(dispatch_ms) - host_ms, 0.0)
 
         return YOLOResult(
             detections=detections,

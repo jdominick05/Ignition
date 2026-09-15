@@ -24,6 +24,7 @@ Ignition runs YOLOv8n object detection on the NPU built into AMD Ryzen AI proces
 - **Lighter to install and run.** Resident memory was 192.5–192.7 MB against AMD's 305.4–306.3 MB (37% less), and the runtime install is about 318 MB against 4.7 GB (93% smaller).
 - **Same answers.** On the reference image both stacks find the same five objects, and their boxes overlap 97% on average (mean IoU 0.968).
 - **A working app included.** `python live_ignition.py` opens your webcam with boxes, labels, confidence scores and a live latency readout.
+- **YOLO11n with its attention block, from source.** In one sitting stock YOLO11n took 11.00–11.05 ms per frame through Ignition and 34.37–34.49 ms through AMD's stack. Its convolutions run on the NPU and its attention block on the CPU between two NPU dispatches ([details](#yolo11n-with-its-attention-block)).
 
 ## Ignition vs AMD's Ryzen AI stack
 
@@ -40,7 +41,7 @@ The same model (`yolov8n_cut_xint8.onnx`, AMD Quark XINT8) ran on the same image
 | **Runtime install on disk** | **≈318 MB** | ≈4,704 MB |
 | Detections on `bus.jpg` | 4 people, 1 bus | the same 5 objects (box IoU 0.93–0.99) |
 | Where the network runs | all 66 layers on the NPU | 922 of 929 graph nodes on the NPU; 7 quantize/dequantize nodes on the CPU |
-| Models it accelerates | YOLOv8n in a release; YOLOv8s and SESR M7 with ignite-xdna from source; other `.onnx` models run on the CPU | any ONNX model its compiler accepts |
+| Models it accelerates | YOLOv8n in a release; YOLOv8s, SESR M7 and YOLO11n (attention block on the CPU) with ignite-xdna from source; other `.onnx` models run on the CPU | any ONNX model its compiler accepts |
 | Before the first run | a compiled `.ignite` container (a one-time build with ignite-xdna) | none: the model compiles on its first session and is cached |
 
 **What the comparison does and does not show:**
@@ -61,7 +62,7 @@ The same model (`yolov8n_cut_xint8.onnx`, AMD Quark XINT8) ran on the same image
 | **NPU driver and XRT** | ✅ Verified | NPU driver 32.0.20101.3760, firmware 1.5.5.391, XRT 2.21.0 |
 | **Python** | ✅ 3.10–3.13 (CPU), 3.13 (NPU) | The CPU path installs and runs on 3.10, 3.11, 3.12 and 3.13. The NPU path needs the Python the XRT SDK's `pyxrt` was built for, 3.13 with XRT 2.21.0; on 3.12 it stops at `DLL load failed while importing pyxrt` |
 | **YOLOv8n detection on the NPU** | ✅ Verified | 640×640 input, AMD Quark XINT8, compiled to `build/yolov8n_full.ignite` by ignite-xdna |
-| **Other models on the NPU** | ⚠️ From source only | YOLOv8s detection and SESR M7 super-resolution run on the NPU through `live_ignition.py` with ignite-xdna built from its `main`; neither is in a release of either project ([how](#5-run-other-models)) |
+| **Other models on the NPU** | ⚠️ From source only | YOLOv8s detection and SESR M7 super-resolution run on the NPU through `live_ignition.py` with ignite-xdna built from its `main`, and so does YOLO11n detection with its attention block on ONNX Runtime's CPU provider; none is in a release of either project ([how](#5-run-other-models)) |
 | **Other ONNX models** | ✅ CPU only | ONNX Runtime's CPU execution provider; `live_ignition.py` detects, classifies or upscales according to the model's outputs |
 | **Webcams** | ✅ Verified | USB webcams through DirectShow, then Media Foundation; tested at 640×480 |
 | **Video files and images** | ✅ Verified | Anything OpenCV opens, letterboxed to 640×640; tested with 640×480 and 810×1080 frames |
@@ -179,21 +180,25 @@ On the test machine, the 100-frame benchmark sustained 128.78 frames per second 
 
 `live_ignition.py` works out what a model computes from the container's manifest or the ONNX model's outputs, and `--task` overrides it:
 
-- **Detection:** YOLO models (YOLOv8n, YOLOv8s), drawn as boxes.
+- **Detection:** YOLO models (YOLOv8n, YOLOv8s, YOLO11n), drawn as boxes.
 - **Classification:** one `(1, N)` output, such as ResNet50, shown as the top 5. Preprocessing follows a timm `preprocess_config.json` beside the model, or ImageNet defaults. It runs on the CPU only.
 - **Super-resolution:** one image output a whole multiple of the input size, such as SESR M7 (256×256 to 512×512), shown as the upscaled image.
 
-YOLOv8s and SESR M7 run on the NPU with ignite-xdna built from its `main`. No ignite-xdna release has its super-resolution pipeline yet; without it a SESR container stops at load with an `ImportError` that says so. Build the containers in the ignite-xdna checkout with the toolchain YOLOv8n needs (ignite-xdna's [model zoo notes](https://github.com/jdominick05/ignite-xdna/blob/main/docs/MODEL_ZOO_BENCHMARKS.md) record how these were built and checked):
+YOLOv8s, SESR M7 and YOLO11n run on the NPU with ignite-xdna built from its `main`. No ignite-xdna release has its super-resolution pipeline yet; without it a SESR container stops at load with an `ImportError` that says so. Build the containers in the ignite-xdna checkout with the toolchain YOLOv8n needs (ignite-xdna's [model zoo notes](https://github.com/jdominick05/ignite-xdna/blob/main/docs/MODEL_ZOO_BENCHMARKS.md) record how these were built and checked):
 
 ```bash
 ignite-compile --engine graph --input models/yolov8s_cut_xint8.onnx --output build/yolov8s.ignite
 ignite-compile --engine graph --input models/sesr_m7_xint8.onnx --output build/sesr_m7.ignite
+ignite-compile --engine graph --input models/yolo11n_cut_xint8.onnx --output build/yolo11n.ignite --host-region /model.10/
 ```
+
+YOLO11n's attention block (C2PSA, the nodes named `/model.10/`) has no NPU lowering, so `--host-region` keeps it on the CPU: the container runs two NPU dispatches with one ONNX Runtime call between them, and the `[summary]` stage line reports that call as `host`. In Git Bash, set `MSYS_NO_PATHCONV=1` for that command, or Git Bash rewrites `/model.10/` as a file path. `yolo11n_cut_xint8.onnx` comes from ignite-xdna's `pipelines/yolov11/` export and quantization scripts; neither project ships it.
 
 Then, from Ignition:
 
 ```bash
 python live_ignition.py --model ../ignite-xdna/build/yolov8s.ignite --source examples/assets/bus.jpg   # window with boxes
+python live_ignition.py --model ../ignite-xdna/build/yolo11n.ignite --source examples/assets/bus.jpg   # window with boxes
 python live_ignition.py --model ../ignite-xdna/build/sesr_m7.ignite --source examples/assets/bus.jpg --headless --frames 300 --json sesr_m7.json
 python live_ignition.py --model ../ignite-xdna/models/resnet50_xint8_c64.onnx --source examples/assets/bus.jpg   # top 5, CPU
 ```
@@ -248,6 +253,22 @@ Measured on 2026-09-14 through `live_ignition.py` with ignite-xdna `68c2fea` and
 - **Where the time goes:** YOLOv8s spent 16.66 ms in NPU dispatch and 0.040 ms in native decode and NMS. SESR M7 spent 4.33 ms in NPU dispatch and 1.91 ms in host post-processing of its output.
 - **On the webcam:** SESR M7 took 6.51 ms per frame on webcam 0 at 640×480.
 
+### YOLO11n with its attention block
+
+Measured on 2026-09-15 (UTC) in one sitting with ignite-xdna `0be9132` and a container built from it, on `examples/assets/bus.jpg` with 50 warm-up and 500 timed frames per run. Runs alternated AMD's stack and Ignition, then ONNX Runtime's CPU provider, and `xrt-smi` reported no hardware contexts before and after every run. AMD's runs used the Vitis AI loop of Ignition's `benchmarks/benchmark_yolo_vitisai.py`, with Ignition's numpy letterbox and decode. The record is ignite-xdna's `results/aie/yolo11n_hybrid_phoenix_20260915T0216Z.log`.
+
+| Run | Stack | Mean | 99th pct | Where the time goes | Objects |
+|---|---|---:|---:|---|---:|
+| 1 | AMD Ryzen AI Software 1.7.1 (ONNX Runtime + Vitis AI EP) | 34.49 ms | 37.60 ms | `session.run` 30.91 ms | 7 |
+| 2 | Ignition, `yolo11n.ignite` | **11.00 ms** | 11.29 ms | NPU dispatch 8.45 ms, attention block on the CPU 1.69 ms | 6 |
+| 3 | AMD Ryzen AI Software 1.7.1 (ONNX Runtime + Vitis AI EP) | 34.37 ms | 37.49 ms | `session.run` 30.74 ms | 7 |
+| 4 | Ignition, `yolo11n.ignite` | **11.05 ms** | 11.58 ms | NPU dispatch 8.44 ms, attention block on the CPU 1.69 ms | 6 |
+| 5 | ONNX Runtime CPU, through `live_ignition.py` | 31.33 ms | 37.33 ms | `session.run` 27.82 ms | 7 |
+
+- **Why AMD's stack is slow here:** its Vitis AI EP rejects the attention block's 4-D matrix multiplies and places 6 of the model's 1,300 graph nodes on the NPU ([ignite-xdna's notes](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#stock-yolo11n-with-its-c2psa-attention-block-npu-segments-around-a-host-step-2026-09-15-desktop-2)). In this sitting it was slower than ONNX Runtime's CPU provider alone.
+- **Why 6 objects against 7:** Ignition's boxes equal ONNX Runtime's CPU decode of the same NPU input (IoU 1.0). The runs differ in their input. AMD's stack and the CPU run use Ignition's numpy letterbox, and Ignition's NPU path uses its native ingress. Both place the image identically, but 15% of the pixel codes differ by one. On the numpy letterbox, ONNX Runtime's CPU provider finds the classes AMD's stack reported: five people, a bus and a handbag. On the native input it finds four people, a bus and a train. No accuracy was measured.
+- **Memory:** resident memory was 203.8 and 204.3 MB for Ignition, unchanged over each run, against 343.1 and 342.8 MB for AMD's stack.
+
 ## How a frame runs
 
 ```mermaid
@@ -273,15 +294,17 @@ Latency is measured glass to glass: from the moment the loop takes a frame to th
 
 These stage times come from the webcam re-check above: 640×480 frames with 4.62 objects per frame. A larger source costs more at ingress; the 810×1080 `bus.jpg` in the AMD comparison took 0.31 ms.
 - **What the NPU time is spent on:** activations move between host memory and the NPU between layers, so most of the dispatch is data movement. A copy of the container with every weight operation switched off still took 5.37 ms of a 7.39 ms dispatch (ignite-xdna `results/model_zoo/dispatch_floor_yolov8n_full.json`).
+- **Host segments:** a YOLO11n container runs its attention block on ONNX Runtime's CPU provider between its two NPU dispatches, reading and writing the NPU's workspace buffer, and reports that step as `host`. It calls ONNX Runtime once per frame; a YOLOv8n container never does.
 - **The CPU fallback:** an `.onnx` model runs the same steps on ONNX Runtime's CPU execution provider instead.
 - **Other tasks:** the diagram shows detection. `SuperResolutionPipeline` runs an `.ignite` container through ignite-xdna's super-resolution pipeline on the NPU, or an `.onnx` model on ONNX Runtime; `ClassificationPipeline` runs on ONNX Runtime only.
 - **The camera:** a capture thread (`ThreadedCamera`) owns the webcam so sensor I/O never stalls inference. It tries DirectShow, then Media Foundation, abandons a backend that does not open within `--open-timeout`, and skips empty frames. It counts the frames it reads and the ones that repeat the previous frame. q, ESC, closing the window, Ctrl+C and Ctrl+Break all release the camera and the NPU.
 
 ## Limitations
 
-- **One NPU model in a release.** YOLOv8n is the only model the released packages run on the NPU. YOLOv8s and SESR M7 need ignite-xdna built from its `main`, ResNet50 classification has no `.ignite` lowering, and other ONNX models run on the CPU.
+- **One NPU model in a release.** YOLOv8n is the only model the released packages run on the NPU. YOLOv8s, SESR M7 and YOLO11n need ignite-xdna built from its `main`, ResNet50 classification has no `.ignite` lowering, and other ONNX models run on the CPU.
 - **A build step.** The `.ignite` container is built from AMD Quark's quantized model with ignite-xdna and the mlir-aie toolchain; it is not a pip install.
 - **Narrow hardware support.** Only Phoenix has been verified. Hawk Point is untested, and Strix-class NPUs and Linux are not supported.
+- **YOLO11n's attention block runs on the CPU.** It took 1.69 ms of an 11.0 ms frame. No accuracy has been measured for the container, and its borderline boxes change with one-code differences in preprocessing: on `bus.jpg` it finds 6 objects where AMD's stack finds 7.
 - **Dim light halves the webcam's frame rate.** The test webcam's auto exposure drops to 15 fps in a dim room; `--exposure-priority off` holds 30 fps with a darker image and fewer detections.
 Open work is tracked in [TODO.md](TODO.md).
 
