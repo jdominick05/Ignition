@@ -84,6 +84,9 @@ python live_ignition.py --headless --frames 300 --fresh --exposure-priority off 
 python live_ignition.py --model ../ignite-xdna/build/yolov8n_full.ignite --source examples/assets/bus.jpg --headless --frames 300
 python live_ignition.py --model ../ignite-xdna/models/yolov8n_cut_xint8.onnx --source examples/assets/bus.jpg --headless --frames 300   # CPU path
 python live_ignition.py --headless --frames 300 --json run.json   # also write the summary as JSON
+python live_ignition.py --power-mode efficiency   # the least CPU energy per frame (see Energy per frame in the performance notes)
+python live_ignition.py --power-mode performance --headless --frames 300   # the most frames per second, every core busy
+python live_ignition.py --source examples/assets/bus.jpg --headless --frames 300 --max-fps 30   # process at a camera's rate
 ```
 
 | Flag | Meaning |
@@ -95,6 +98,8 @@ python live_ignition.py --headless --frames 300 --json run.json   # also write t
 | `--frames N` | Stop after N timed frames and print the summary (default 0: run until stopped). |
 | `--warmup N` | Untimed frames before the timed ones (default 10). |
 | `--fresh` | Wait for a new camera frame before each inference instead of reusing the newest one. |
+| `--power-mode` | For `.ignite` containers, how the host's threads trade CPU power for speed, sized to your processor: `performance` keeps worker threads spinning on every logical processor (the most frames per second), `balanced` (the default) lets them sleep between frames with one per physical core, `efficiency` sleeps them with a quarter of the physical cores (the least energy). The app prints the mode it applied. `IGNITE_XDNA_POWER_MODE` sets the same thing ([measurements](PERFORMANCE.md#energy-per-frame-against-amds-stack)). |
+| `--max-fps` | Process at most this many frames per second, waiting between frames the way a camera does; the wait is not part of glass-to-glass time (default 0: as fast as possible). |
 | `--conf`, `--iou` | Detection confidence and NMS IoU thresholds (defaults 0.25 and 0.45). |
 | `--open-timeout` | Seconds allowed for each camera backend to open (default 8). |
 | `--camera-backend` | `auto` (DirectShow, then Media Foundation, then OpenCV's default; the default), `dshow`, `msmf` or `any`. |
@@ -162,7 +167,7 @@ python live_ignition.py --model ../ignite-xdna/models/resnet50_xint8_c64.onnx --
 ignition suite ../ignite-xdna/build/yolov8n_full.ignite ../ignite-xdna/models/yolov8n_cut_xint8.onnx --out results/suite-yolov8n
 ```
 
-- **One process per model:** each model runs through the app in its own process (`python -m ignition.live --headless`), on `examples/assets/bus.jpg` unless `--source` names another image, video or webcam, with `--warmup` (default 10) untimed and `--frames` (default 300) timed frames.
+- **One process per model:** each model runs through the app in its own process (`python -m ignition.live --headless`), on `examples/assets/bus.jpg` unless `--source` names another image, video or webcam, with `--warmup` (default 10) untimed and `--frames` (default 300) timed frames. `--power-mode` passes the same host-thread mode to every run.
 - **One record per model:** `--out` gets `<model>.json`, which holds the app's `--json` summary plus the command, its return code, the Ignition and ignite-xdna versions with `git describe --dirty` of their checkouts, and, for an `.ignite` container, what `xrt-smi` reported before and after the run. A `<model>.log` and an `index.json` sit beside them. Checkout paths, the output directory and the Windows profile directory appear as labels.
 - **Nothing overwritten:** an existing `--out` directory is refused. The command exits 1 if a run fails, records no timed frames, or starts while another hardware context is on the NPU, which would make its latency contention.
 

@@ -22,6 +22,7 @@ The same model (`yolov8n_cut_xint8.onnx`, AMD Quark XINT8) ran on the same image
 
 **What the comparison does and does not show:**
 - **Where Ignition's lead comes from.** It is entirely in host-side code. AMD's runtime executes the network and leaves image preparation and box decoding to your application, so the AMD column uses Ignition's reference numpy versions of those steps. Ignition ships them as native code. Hand-written native pre- and post-processing on AMD's stack would narrow the gap.
+- **Which power mode these latencies are.** They were measured before power modes existed, when Ignition's host threads always spun between frames: what `--power-mode performance` does now. The default, `balanced`, gave up about 0.46 ms per frame on YOLOv8n for a third of the energy in a later sitting ([energy per frame](#energy-per-frame-against-amds-stack)); this table has not been re-measured in it.
 - **Where AMD is ahead.** AMD's NPU stage itself is about 0.7 ms faster than Ignition's. AMD's stack also runs a much wider range of models, and its current release targets newer NPUs.
 - **What the disk figures count.** AMD's covers the Ryzen AI 1.7.1 install (4,072 MB), its ONNX Runtime with the Vitis AI EP (615 MB), `voe` (3 MB) and the compile cache (14 MB). Ignition's covers the XRT SDK with `pyxrt` (262 MB), ONNX Runtime for the CPU fallback (44 MB), ignite-xdna (3 MB), the `.ignite` container (8 MB) and Ignition itself (66 KB). Neither counts Python, numpy, OpenCV or the NPU driver. Building a container needs the mlir-aie toolchain, which is not counted.
 - **Why the AMD column uses 1.7.1.** In this project's testing, Ryzen AI Software 1.8.0 installed without the Phoenix/Hawk Point xclbin that its own documentation calls for, and rejected the driver's XDNA1 xclbins, so NPU inference on these chips stays on 1.7.1. That looks like a packaging bug, reported upstream as [amd/RyzenAI-SW#400](https://github.com/amd/RyzenAI-SW/issues/400) ([ignite-xdna decision record](https://github.com/jdominick05/ignite-xdna/blob/main/docs/DECISIONS.md)).
@@ -122,6 +123,42 @@ Measured on 2026-09-15 (UTC) in one sitting, with ignite-xdna's pose support and
 - **Why 3 people:** on `bus.jpg` both stacks report 3 people. On the numpy letterbox the container, like ONNX Runtime's CPU provider, finds 4, so AMD's execution provider and the native letterbox each lose one.
 - **Decode:** keypoint decode and NMS run in numpy, 0.29–0.32 ms per frame against 0.03 ms for YOLOv8n's native decode.
 - **Memory:** Ignition's resident memory was 182.1 MB, unchanged over each run.
+
+## Energy per frame against AMD's stack
+
+Measured on 2026-09-16 (UTC) with ignite-xdna's `tools/energy_sitting.py` on YOLOv8n and `examples/assets/bus.jpg`, the stacks interleaved in one sitting per table. The machine has no NPU power meter, so each figure is what the whole application added to the processor package's power (AMD RAPL) over an idle baseline taken right before it, divided by the frames it completed in the same window; start-up and warm-up are excluded. Ignition ran with each `--power-mode`, and AMD's arm is ONNX Runtime with the Vitis AI EP and Ignition's own letterbox and decode. Records: ignite-xdna's `results/aie/energy_power_modes_paced30_yolov8n_phoenix_20260916T1702Z.log` and `results/aie/energy_power_modes_yolov8n_phoenix_20260916T1645Z.log`.
+
+**At a camera's 30 frames per second** (`--max-fps 30`, 1,200 frames per run):
+
+| Run | Stack | Power mode | Mean G2G | CPU | Above idle | Energy per frame |
+|---|---|---|---:|---:|---:|---:|
+| 1 | AMD Ryzen AI Software 1.7.1 (ONNX Runtime + Vitis AI EP) | — | 11.04 ms | 8.4 % | 6.53 W | 217.6 mJ |
+| 2 | Ignition on the container | performance | 7.98 ms | 99.9 % | 41.54 W | 1,384.8 mJ |
+| 3 | Ignition on the container | balanced | 8.74 ms | 7.8 % | 5.91 W | **196.9 mJ** |
+| 4 | Ignition on the container | efficiency | 9.53 ms | 7.9 % | 5.11 W | **170.3 mJ** |
+| 5 | AMD Ryzen AI Software 1.7.1 (ONNX Runtime + Vitis AI EP) | — | 10.97 ms | 8.5 % | 6.01 W | 200.4 mJ |
+| 6 | Ignition on the container | performance | 8.04 ms | 100.0 % | 41.15 W | 1,371.8 mJ |
+| 7 | Ignition on the container | balanced | 8.80 ms | 7.8 % | 5.36 W | **178.7 mJ** |
+| 8 | Ignition on the container | efficiency | 9.58 ms | 7.9 % | 4.77 W | **159.1 mJ** |
+
+**As fast as each stack runs** (4,000 Ignition and 3,200 AMD frames per run):
+
+| Run | Stack | Power mode | Frames per second | Mean G2G | CPU | Energy per frame |
+|---|---|---|---:|---:|---:|---:|
+| 1 | AMD Ryzen AI Software 1.7.1 (ONNX Runtime + Vitis AI EP) | — | 89.08 | 11.22 ms | 10.8 % | 126.6 mJ |
+| 2 | Ignition on the container | performance | **125.81** | 7.93 ms | 99.9 % | 377.7 mJ |
+| 3 | Ignition on the container | balanced | 119.06 | 8.38 ms | 11.1 % | 128.7 mJ |
+| 4 | Ignition on the container | efficiency | 109.56 | 9.11 ms | 9.3 % | **114.7 mJ** |
+| 5 | AMD Ryzen AI Software 1.7.1 (ONNX Runtime + Vitis AI EP) | — | 95.77 | 10.45 ms | 11.6 % | 123.5 mJ |
+| 6 | Ignition on the container | performance | **126.25** | 7.91 ms | 100.0 % | 381.6 mJ |
+| 7 | Ignition on the container | balanced | 119.11 | 8.38 ms | 10.5 % | 124.5 mJ |
+| 8 | Ignition on the container | efficiency | 108.53 | 9.20 ms | 10.8 % | 120.7 mJ |
+
+- **At 30 fps Ignition spends less than AMD's stack:** balanced, the default, 187.8 mJ per frame on the mean of its two runs against 209.0, and efficiency 164.7, 21 % less, while both stay ahead on latency. Both runs of each mode read lower than both of AMD's.
+- **Flat out, the default matches AMD's energy per frame at 24–34 % more frames per second.** Efficiency's lower mean there is inside its own two runs' spread and is not claimed.
+- **Performance mode keeps every worker thread spinning between frames:** the most frames per second, and at a camera's rate about 41 W for work the other modes do in 4.8–5.9 W. It was Ignition's only behaviour before power modes existed, because the setting meant to stop the spinning never reached MSVC's OpenMP runtime ([ignite-xdna's notes](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#energy-per-frame-against-amds-stack-and-power-modes-2026-09-16-desktop-2)).
+- **Scope:** one model and one machine, an 8-core, 16-thread Ryzen 7 8700G. The modes size themselves to the host's cores; other hosts are unmeasured.
+- **The latency sections above predate power modes.** Every Ignition latency on this page before this section was measured with spinning threads, which is `--power-mode performance` today, not the `balanced` default.
 
 ## How a frame runs
 

@@ -35,6 +35,12 @@ the newest frame, or with --fresh waits for each new one.
 --json PATH writes the run's summary (latency percentiles, stage means, RSS drift,
 host) as one JSON object, for tools that compare models.
 
+--power-mode chooses how an .ignite container's host threads trade CPU power for speed,
+sized to this machine's own cores: performance keeps them spinning on every logical
+processor, balanced (the default) lets them sleep between frames with one per physical
+core, and efficiency sleeps them with a quarter of the physical cores. --max-fps caps the
+processing rate, waiting between frames the way a camera would.
+
 Stop with q or ESC in the window, by closing the window, or with Ctrl+C /
 Ctrl+Break. Every path releases the camera, closes the window and releases the
 NPU hardware context, then exits 0.
@@ -487,12 +493,41 @@ def parse_args(argv=None) -> argparse.Namespace:
                     help="the webcam's exposure auto priority for this run, put back on exit (DirectShow): off "
                          "holds the frame rate in dim light with a darker image, on lets auto exposure lower it "
                          "(default keep: leave the camera's setting)")
+    ap.add_argument("--power-mode", choices=POWER_MODES, default=None,
+                    help="for .ignite containers, how host threads trade CPU power for speed, sized to this machine: "
+                         "performance spins them on every logical processor, balanced sleeps them between frames with "
+                         "one per physical core, efficiency sleeps them with a quarter of the physical cores "
+                         "(default: IGNITE_XDNA_POWER_MODE if set, else balanced)")
+    ap.add_argument("--max-fps", type=float, default=0.0,
+                    help="process at most this many frames per second, waiting between frames; the wait is not part "
+                         "of G2G (default 0: as fast as the source and model allow)")
     ap.add_argument("--json", default=None, help="write the run summary to this JSON file")
     return ap.parse_args(argv)
 
 
+POWER_MODES = ("efficiency", "balanced", "performance")
+
+
+def select_power_mode(mode: Optional[str]) -> None:
+    """Hand --power-mode to ignite-xdna. It must be in the environment before ignite_xdna is first imported, because
+    importing it loads the native preprocessor, whose OpenMP runtime reads its settings once."""
+    if mode:
+        os.environ["IGNITE_XDNA_POWER_MODE"] = mode
+
+
+def power_settings() -> Optional[Dict[str, Any]]:
+    """The power mode ignite-xdna's native preprocessor loaded with; None before ignite-xdna had power modes."""
+    try:
+        from ignite_xdna.pipelines import power
+    except ImportError:
+        return None
+    settings = power.current_settings()
+    return None if settings is None else {**settings.as_dict(), "description": settings.describe()}
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
+    select_power_mode(args.power_mode)
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout, force=True)
     stop = StopRequest()
     stop.install()
@@ -513,6 +548,9 @@ def main(argv=None) -> int:
     print(f"[Ignition] task: {task}", flush=True)
     if not native:
         print("[Ignition] ONNX Runtime CPU backend active", flush=True)
+    power = power_settings() if native else None
+    if power:
+        print(f"[Ignition] power mode {power['description']}", flush=True)
 
     try:
         source = open_source(args.source, args.open_timeout, args.camera_backend, args.exposure_priority)
@@ -538,6 +576,8 @@ def main(argv=None) -> int:
     window = not args.headless
     if window:
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
+    period = 1.0 / args.max_fps if args.max_fps > 0 else 0.0
+    t_schedule: Optional[float] = None
     try:
         while True:
             if stop.requested:
@@ -545,6 +585,13 @@ def main(argv=None) -> int:
                 break
             if frame_limit and processed >= frame_limit:
                 break
+            if period:
+                # An absolute schedule: a late frame does not make the next one early, and the rate averages max_fps.
+                if t_schedule is None:
+                    t_schedule = time.perf_counter()
+                delay = t_schedule + processed * period - time.perf_counter()
+                if delay > 0:
+                    time.sleep(delay)
             frame, seq, arrival = source.read(after_seq=last_seq if args.fresh else 0, timeout_s=1.0)
             if frame is None or frame.size == 0:
                 if source.finished:
@@ -622,7 +669,7 @@ def main(argv=None) -> int:
         "model": str(model), "model_name": model.name, "model_bytes": model.stat().st_size, "task": task,
         "backend": "npu" if native else "onnxruntime-cpu", "source": source.label, "source_kind": source.kind,
         "frames_requested": args.frames, "warmup": args.warmup, "frames_processed": processed, "frames_timed": timed,
-        "stop_reason": stop_reason, "host": host_info(),
+        "stop_reason": stop_reason, "host": host_info(), "max_fps": args.max_fps, "power_mode": power,
     }
     if source.kind == "camera":
         frames, repeats, span = source.rates()

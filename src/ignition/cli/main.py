@@ -250,7 +250,9 @@ def detect_objects(model_path, input_path, output_path, backend, conf, iou, stre
               help="New directory for the records (default: suite-<UTC time> in the current directory); "
                    "an existing directory is refused.")
 @click.option("--timeout", default=1800.0, show_default=True, type=float, help="Seconds allowed per model process.")
-def run_model_suite(models, source, frames, warmup, out_dir, timeout):
+@click.option("--power-mode", type=click.Choice(["efficiency", "balanced", "performance"]), default=None,
+              help="Host-thread power mode for .ignite containers, passed to every run (default: balanced).")
+def run_model_suite(models, source, frames, warmup, out_dir, timeout, power_mode):
     """Run each model in its own ignition.live process and write one JSON record per model."""
     from ignition.suite import default_source, format_table, run_suite
 
@@ -265,10 +267,13 @@ def run_model_suite(models, source, frames, warmup, out_dir, timeout):
     click.echo(f"Models:  {len(models)}, one process each")
     click.echo(f"Source:  {src}")
     click.echo(f"Frames:  {frames} timed after {warmup} warm-up")
+    if power_mode:
+        click.echo(f"Power:   {power_mode}")
     click.echo(f"Records: {out}")
     click.echo("--------------------------------------------------------------------------------")
     try:
-        index = run_suite([Path(m) for m in models], out, str(src), frames, warmup, timeout, echo=click.echo)
+        index = run_suite([Path(m) for m in models], out, str(src), frames, warmup, timeout, echo=click.echo,
+                          power_mode=power_mode)
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
         click.secho(f"[-] {exc}", fg="red")
         sys.exit(2)

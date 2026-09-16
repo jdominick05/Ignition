@@ -121,7 +121,8 @@ def _ms(value: Any) -> str:
 
 
 def run_suite(models: Sequence[Path], out_dir: Path, source: str, frames: int, warmup: int = 10,
-              timeout_s: float = 1800.0, echo: Callable[[str], None] = print) -> Dict[str, Any]:
+              timeout_s: float = 1800.0, echo: Callable[[str], None] = print,
+              power_mode: Optional[str] = None) -> Dict[str, Any]:
     """Runs every model in its own ``ignition.live`` process; writes ``<name>.json`` and ``<name>.log`` per
     model and ``index.json`` into ``out_dir``, which must not exist. Returns the index (``all_ok`` says
     whether every run exited 0 with timed frames and, on the NPU, started on an idle device)."""
@@ -182,6 +183,8 @@ def run_suite(models: Sequence[Path], out_dir: Path, source: str, frames: int, w
         log_path = out_dir / f"{name}.log"
         cmd = [sys.executable, "-m", "ignition.live", "--model", str(model), "--source", source, "--headless",
                "--frames", str(frames), "--warmup", str(warmup), "--json", str(live_json)]
+        if power_mode:
+            cmd += ["--power-mode", power_mode]
         entry: Dict[str, Any] = {"suite_created_utc": created, "model_path": str(model), "log": log_path.name,
                                  "command": cmd, **provenance}
         problems: List[str] = []
