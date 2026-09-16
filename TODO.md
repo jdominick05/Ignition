@@ -95,6 +95,10 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   170.3 and 159.1 mJ, against 217.6 and 200.4 mJ on AMD's stack and 1,384.8 and 1,371.8 mJ for the old spinning
   behaviour, now `performance` (ignite-xdna `results/aie/energy_power_modes_paced30_yolov8n_phoenix_20260916T1702Z.log`,
   [performance notes](docs/PERFORMANCE.md#energy-per-frame-against-amds-stack)).
+- [x] **v0.3.2 release** (tag at `7ce27fd`): the Ignition 0.3.2 wheel and sdist, the ignite-xdna 0.3.0 wheel and
+  SHA-256 sums on GitHub and GitLab, with [notes](docs/releases/v0.3.2.md). Before tagging, the wheel, the sdist and the
+  two-wheel `[npu]` install each passed in a fresh environment, the last loading ignite-xdna's native ingress kernel;
+  after publishing, every file was downloaded back from both hosts and matched the sums.
 
 ## Active
 
