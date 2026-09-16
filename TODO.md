@@ -236,10 +236,13 @@ the models have been measured, on the 8-core, 16-thread Ryzen 7 8700G only ([per
 - [x] Measure what the NPU's own power mode buys before deciding whether `efficiency` should switch it.
   `xrt-smi configure --pmode powersaver` saved 14 % energy per frame at 30 fps for twice the latency, and nothing
   flat out. Ignition then ran slower than AMD's stack in the same mode, and the setting slows every NPU application.
-- [ ] Decide, from that measurement, whether any power mode should switch the NPU's device-wide mode. Nothing
-  switches it now.
-- [ ] Ship ignite-xdna `fbd53f5` in a release. It puts a container's CPU step (YOLO11n's attention core) under the
-  power mode; ignite-xdna 0.3.0, which the `npu` extra requires, still spins those threads in every mode.
+- [x] Decide whether any power mode should switch the NPU's device-wide mode. The maintainer's decision
+  (2026-09-16): yes. Nothing switches it yet.
+- [ ] Design and build that switch. What it must respect, from the measurement: it pays only while the frame rate is
+  capped, it roughly doubles latency, it is device-wide, and a crashed process must not leave the NPU slowed.
+- [ ] ignite-xdna `fbd53f5` is on its `main` but in no release. It puts a container's CPU step (YOLO11n's attention
+  core) under the power mode; ignite-xdna 0.3.0, which the `npu` extra requires, still spins those threads in every
+  mode. The maintainer chose not to release for it (2026-09-16), so it ships with the next release.
 - [ ] Find out why SESR M7's frame does not spin in `performance` (9.7–10.0 % CPU, like the sleeping modes).
 - [x] `--power-mode` needs an ignite-xdna with `pipelines/power.py`: the `npu` extra now requires ignite-xdna 0.3.0,
   which has it. An older ignite-xdna ignores the mode and prints no power line.
