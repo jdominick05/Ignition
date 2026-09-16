@@ -27,19 +27,19 @@ worth its hours, and how to validate the result before quoting a number.
 
 ## Other ways to install
 
-**From a release.** Download the wheels from the [v0.3.1 release](https://github.com/jdominick05/Ignition/releases/tag/v0.3.1) into one folder and run pip in that folder; GitLab's release carries the same files. For the NPU path:
+**From a release.** Download the wheels from the [v0.3.2 release](https://github.com/jdominick05/Ignition/releases/tag/v0.3.2) into one folder and run pip in that folder; GitLab's release carries the same files. For the NPU path:
 
 ```bash
-pip install ./ignite_xdna-0.2.0-py3-none-any.whl "./ignition_ai-0.3.1-py3-none-any.whl[npu]"
+pip install ./ignite_xdna-0.3.0-py3-none-any.whl "./ignition_ai-0.3.2-py3-none-any.whl[npu]"
 ```
 
 For `.onnx` models on the CPU only:
 
 ```bash
-pip install ./ignition_ai-0.3.1-py3-none-any.whl
+pip install ./ignition_ai-0.3.2-py3-none-any.whl
 ```
 
-The wheels carry the Python API and the `ignition` command, and the container is still built in an ignite-xdna checkout. v0.3.1 predates the backend, camera, native-decode, model-zoo and suite changes listed in [TODO.md](../TODO.md)'s completed work: its wheels have no webcam app, which the package now holds as `ignition.live` and a checkout's `live_ignition.py` launches.
+The wheels carry the Python API, the `ignition` command and the app (`python -m ignition.live`, which a checkout's `live_ignition.py` launches). The container is still built in an ignite-xdna checkout.
 
 **From source**, which the steps below use:
 
