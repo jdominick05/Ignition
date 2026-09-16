@@ -127,6 +127,16 @@ color = "blue"
 
 [[badge]]
 row = 2
+alt = "YOLO11n energy per frame at full speed, Ignition's default balanced power mode and AMD's stack, both runs"
+label = "YOLO11n energy per frame"
+file = "docs/PERFORMANCE.md"
+section = "Energy per frame against AMD's stack"
+search = '\| YOLO11n \| AMD[^|]*\|[^|]*\|[^|]*\| \**([0-9.,]+) / ([0-9.,]+) mJ(?s:.*?)\| YOLO11n \| Ignition[^|]*\| balanced \|[^|]*\| \**([0-9.,]+) / ([0-9.,]+) mJ'
+replace = "$3 / $4 mJ vs AMD $1 / $2 mJ"
+color = "brightgreen"
+
+[[badge]]
+row = 2
 alt = "YOLOv8n energy per frame at 30 frames per second, Ignition's default balanced power mode and AMD's stack, both runs"
 label = "YOLOv8n energy at 30 fps"
 file = "docs/PERFORMANCE.md"

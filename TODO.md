@@ -99,6 +99,16 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   SHA-256 sums on GitHub and GitLab, with [notes](docs/releases/v0.3.2.md). Before tagging, the wheel, the sdist and the
   two-wheel `[npu]` install each passed in a fresh environment, the last loading ignite-xdna's native ingress kernel;
   after publishing, every file was downloaded back from both hosts and matched the sums.
+- [x] **Every AMD comparison in the default power mode, energy on every model, and the NPU's own power mode**
+  (recorded in the commit that adds this entry). The latency tables and badges were re-measured with `balanced`
+  instead of spinning threads. YOLOv8n took 8.42 / 8.39 ms against AMD's 10.39 / 10.34, and YOLOv8s 18.05 / 17.99
+  against 16.74 / 16.56 (ignite-xdna `results/aie/latency_balanced_default_phoenix_20260916T1745Z.log`). Energy per
+  frame was measured on YOLOv8s, SESR M7, YOLO11n and YOLOv8n-pose. That found YOLO11n's CPU step spinning its own
+  ONNX Runtime threads in every mode; ignite-xdna `fbd53f5` puts it under the power mode, and YOLO11n then spent
+  166.3 / 164.9 mJ per frame against AMD's 1,387.2 / 1,405.8 (ignite-xdna
+  `results/aie/energy_power_modes_models_phoenix_20260916T2012Z.log`). Switching the NPU to `powersaver` saved 14 %
+  per frame at 30 fps for twice the latency, and nothing flat out (ignite-xdna
+  `results/aie/energy_npu_pmode_yolov8n_phoenix_20260916T1931Z.log`).
 
 ## Active
 
@@ -123,14 +133,15 @@ On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.6
 - [x] The `npu` extra requires ignite-xdna 0.3.0 (ignite-xdna `554ab57`), the first ignite-xdna release with
   `pipelines/sr_pipeline.py`, `pipelines/pose_pipeline.py` and host segments, which Ignition's super-resolution, pose
   and YOLO11n paths import.
-- [ ] YOLO11n's attention core, two matrix multiplies and a softmax, runs on the CPU (0.51–0.53 ms per frame);
+- [ ] YOLO11n's attention core, two matrix multiplies and a softmax, runs on the CPU (0.71–0.73 ms per frame in the
+  default power mode, 0.55–0.57 ms in `performance`, since ignite-xdna `fbd53f5`);
   the engine has no softmax or activation-by-activation multiply, so running it on the NPU is ignite-xdna work.
   The block cannot be dropped: the C2PSA-ablated `yolo11n_no_c2psa` finds nothing on `bus.jpg`
   (highest class score 0.02 in FP32 and 0.06 in XINT8), and ignite-xdna measured mAP@50-95 0.19 for it on AMD's
   Vitis AI EP against 38.72 for stock FP32 on the CPU (ignite-xdna `docs/BENCHMARKS.md`, its YOLOv11n section).
 - [ ] Measure YOLO11n's COCO accuracy through the container. On `bus.jpg` it finds 6 objects where ONNX Runtime
   on Ignition's numpy letterbox finds 7, because the two inputs differ by one code in 15% of pixel values.
-- [ ] YOLOv8n-pose decodes its keypoints in numpy: decode and NMS take 0.29–0.32 ms per frame against 0.03 ms for
+- [ ] YOLOv8n-pose decodes its keypoints in numpy: decode and NMS take 0.31–0.32 ms per frame against 0.04 ms for
   YOLOv8n's native decode. A container from the AdaRound pose model (34.32 OKS mAP@50-95 on AMD's stack) is not
   built or checked.
 - [ ] ResNet50 has no `.ignite` lowering yet.
@@ -164,17 +175,25 @@ Only Phoenix on Windows 11 is verified ([usage notes](docs/USAGE.md#compatibilit
 
 - [ ] Run the `.ignite` path on a Hawk Point NPU (same XDNA1 generation) and record it before calling it
   supported.
+- [ ] **Blocked on hardware:** measure the power modes on a host with a different core count before calling their
+  sizing verified. Only the 8-core, 16-thread Ryzen 7 8700G has run them. A Hawk Point laptop such as the Ryzen 5
+  8645HS (6 cores, 12 threads) would cover this and the item above in one sitting.
 
 ### 4. NPU dispatch time (ignite-xdna)
 
-AMD's NPU stage is about 0.7 ms faster than Ignition's on the same model and image in the
-[performance notes](docs/PERFORMANCE.md#ignition-vs-amds-ryzen-ai-stack)' same-sitting comparison (0.8 ms in `d42d33e`). Most of
-Ignition's dispatch is activations moving between host memory and the NPU: 5.37 ms of a 7.39 ms dispatch with
-every weight operation switched off (ignite-xdna `results/model_zoo/dispatch_floor_yolov8n_full.json`).
+AMD's NPU stage is about 1.3 ms faster than Ignition's in the default power mode, 1.0 ms in `performance`, on the
+same model and image in the [performance notes](docs/PERFORMANCE.md#ignition-vs-amds-ryzen-ai-stack)' same-sitting
+comparison (0.7 ms with spinning threads in `ffdefad`). Ignition's NPU figure includes the head readback, which the
+default mode slows by 0.3 ms. Most of Ignition's dispatch is activations moving between host memory and the NPU:
+5.37 ms of a 7.39 ms dispatch with every weight operation switched off (ignite-xdna
+`results/model_zoo/dispatch_floor_yolov8n_full.json`).
 
-The gap is wider on other models. In one sitting AMD's `session.run` took 13.14–13.17 ms on YOLOv8s against Ignition's
-16.70–16.74 ms dispatch, and 1.46–1.47 ms on SESR M7 against 4.39–4.41 ms, so AMD's stack is faster end to end on
-both: 16.95–16.96 against 17.24–17.27 ms, and 3.63–3.65 against 6.66–6.67 ms ([performance notes](docs/PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)).
+The gap is wider on other models. In one sitting in the default mode AMD's `session.run` took 12.67–12.79 ms on
+YOLOv8s against Ignition's 16.76–16.79 ms dispatch, and 1.49–1.50 ms on SESR M7 against 4.18 ms, so AMD's stack is
+faster end to end on both: 16.56–16.74 against 17.99–18.05 ms, and 4.33–4.37 against 6.82–6.84 ms
+([performance notes](docs/PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)). With spinning threads on
+2026-09-15 the YOLOv8s gap was 0.30 ms; in the default mode it is 1.36 ms with the dispatch unchanged, and how much of
+that is the mode rather than the installation was not separated.
 
 - [x] **Keep data on the NPU between layers: tried in ignite-xdna, and closed as a known limitation on YOLOv8s
   (2026-09-16).** The target was Ignition's NPU stage no slower than AMD's in a same-sitting run. Holding activations
@@ -205,18 +224,79 @@ lowering and scheduling (0–1.9 s), `clang++` compiling `engine.cc` (1.9–4.9 
 ### 6. Energy and power modes
 
 Power modes size the host's worker threads to its own cores: `performance` spins every logical processor,
-`balanced` (the default) sleeps one per physical core, `efficiency` sleeps a quarter of the physical cores. Only
-YOLOv8n on the 8-core, 16-thread Ryzen 7 8700G has been measured ([performance notes](docs/PERFORMANCE.md#energy-per-frame-against-amds-stack)).
+`balanced` (the default) sleeps one per physical core, `efficiency` sleeps a quarter of the physical cores. All of
+the models have been measured, on the 8-core, 16-thread Ryzen 7 8700G only ([performance notes](docs/PERFORMANCE.md#energy-per-frame-against-amds-stack)).
 
-- [ ] Re-measure the latency comparisons against AMD's stack in the `balanced` default: every latency badge and table
-  was measured with spinning threads, which is `performance` now, and `balanced` gave up about 0.46 ms per frame on
-  YOLOv8n.
-- [ ] Measure energy per frame at 30 fps and at full speed on YOLOv8s, SESR M7, YOLOv8n-pose and YOLO11n.
-- [ ] Measure the modes on a 6-core part (with the Hawk Point run in §3) before calling their sizing verified.
-- [ ] Decide whether `efficiency` should also switch the NPU's own power mode (`xrt-smi configure --pmode`, 0.8 GHz in
-  `powersaver`). It is device-wide, so it would slow every other NPU application until put back.
+- [x] Re-measure the latency comparisons against AMD's stack in the `balanced` default. Done for every table and
+  badge: `balanced` costs YOLOv8n 0.43 ms against `performance`, all of it host work around an unchanged dispatch.
+- [x] Measure energy per frame at 30 fps and at full speed on YOLOv8s, SESR M7, YOLOv8n-pose and YOLO11n. Ignition
+  spends less on YOLO11n (8.4 times) and YOLOv8n-pose (19 % flat out, 27 % at 30 fps). AMD's stack spends less
+  flat out on YOLOv8s and SESR M7, and at 30 fps the stacks do not separate on either. Two sittings were discarded
+  for a 5.5 W idle offset; ignite-xdna's energy tool now flags one.
+- [x] Measure what the NPU's own power mode buys before deciding whether `efficiency` should switch it.
+  `xrt-smi configure --pmode powersaver` saved 14 % energy per frame at 30 fps for twice the latency, and nothing
+  flat out. Ignition then ran slower than AMD's stack in the same mode, and the setting slows every NPU application.
+- [ ] Decide, from that measurement, whether any power mode should switch the NPU's device-wide mode. Nothing
+  switches it now.
+- [ ] Ship ignite-xdna `fbd53f5` in a release. It puts a container's CPU step (YOLO11n's attention core) under the
+  power mode; ignite-xdna 0.3.0, which the `npu` extra requires, still spins those threads in every mode.
+- [ ] Find out why SESR M7's frame does not spin in `performance` (9.7–10.0 % CPU, like the sleeping modes).
 - [x] `--power-mode` needs an ignite-xdna with `pipelines/power.py`: the `npu` extra now requires ignite-xdna 0.3.0,
   which has it. An older ignite-xdna ignores the mode and prints no power line.
+- The 6-core measurement is blocked on hardware and lives in §3 with the Hawk Point run.
+
+### 7. Models AMD's stack cannot run usefully on XDNA1 (frontier)
+
+**The goal:** more models that are *usable* on a Phoenix NPU through Ignition than through AMD's stack. Usable means
+layer-exact on the NPU, accurate against FP32, and faster than ONNX Runtime's CPU provider on the same host. Every
+claim is measured beside AMD's stack in one sitting, as the badges already are.
+
+**The gap to aim at**, from measurements already in ignite-xdna's `docs/BENCHMARKS.md`:
+- **XINT8 collapse.** AMD's quantization collapses some models: MobileViT-XXS at 0.00 % top-1, DenseNet-121 and
+  ResNeXt-50 at 0.10 %, YOLO-World v2 at 1.8 % mAP against 37.0 % in FP32. The CPU collapses the same way on the same
+  quantized models, so the answer is precision, not placement.
+- **INT16 activations.** The silicon runs them at 0.93 times int8's speed, but AMD's toolchain cannot express them
+  on XDNA1: at opset 17 its runtime rejects the quantization nodes, and at opset 21 its parser rejects the model.
+- **Placement.** Some models barely reach the NPU: YOLO11n gets 6 of 1,300 nodes and YOLO-World v2 48 of 1,081,
+  which leaves them slower than the CPU alone.
+- **Newer releases.** In this project's testing, Ryzen AI 1.8 installed without the Phoenix xclbin and rejected the
+  driver's XDNA1 xclbins, so XDNA1 users stay on 1.7.1 ([amd/RyzenAI-SW#400](https://github.com/amd/RyzenAI-SW/issues/400)).
+- **The class that fits.** The engine's tile is 20 px, which is the deepest map of a network at a 640 input
+  (stride 32). Dense-prediction models at 640 fit: detection, segmentation, pose, depth, matting and
+  super-resolution. Classifiers at 224 shrink to 7 px and do not.
+
+**Compiler and tooling (no kernel change):**
+- [ ] A compatibility matrix in the performance notes: per model, layer-exactness, accuracy and latency against the
+  CPU, with AMD's placement, accuracy and latency beside them, and a "usable models" badge against AMD.
+- [ ] `ignition check model.onnx`: which nodes would run on the NPU, which on the CPU, and which are refused with the
+  rule that refuses them, plus a predicted frame time, all before a compile.
+- [ ] Automatic partitioning. Today CPU segments are named by hand (`--host-region`). The compiler should find the
+  largest NPU-ready subgraphs and decide with the dispatch cost model (about 0.25 ms fixed per dispatch plus transport)
+  where a CPU segment pays.
+- [ ] Exact graph rewrites:
+  - **Hypothesis, to prove offline first:** a 1x1 stride-2 convolution is a 3x3 stride-2 pad-1 convolution with only
+    its centre weight, which reads the same pixels at the same output size. It would unlock ResNet-style downsample
+    shortcuts.
+  - Channel counts padded to multiples of 32.
+  - Classifier tails (global average pool, Gemm) as CPU segments.
+- [ ] Mixed precision through CPU segments: the layers that collapse at 8 bits in FP32 on the CPU, the rest on the
+  NPU. First candidates are YOLO-World v2 (its offline accuracy ablation gates everything else) and MobileViT-XXS.
+  AMD's quantizer can also leave nodes in FP32 on the CPU, so the claim to prove is speed at equal accuracy.
+- [ ] Per-channel weight scales, which AMD's stack rejects. **Unverified:** whether the engine's requantization shift
+  is per-channel data in the weight packet (no kernel change) or fixed in the kernel (a kernel decision).
+
+**Kernel decisions (the one-program rule: the maintainer decides, with measured sizing):**
+- [ ] Maps smaller than the 20 px tile: classifiers, and 28 of ResNet50's 53 convolutions.
+- [ ] An INT16-activation kernel, for models that collapse at 8 bits.
+- [ ] Dilated and transposed convolutions, for segmentation and depth decoders.
+- [ ] Attention on the NPU with the BF16 GEMM kernel. Low priority: YOLO11n's attention core is under a millisecond
+  on the CPU.
+
+**App tasks built from the above:** instance segmentation (YOLOv8n-seg: its mask assembly is one small matrix
+multiply on the CPU, and the rest is convolutions, like pose), depth (FastDepth, MiDaS small), matting (MODNet),
+semantic segmentation (BiSeNetV2) and oriented boxes.
+
+**Not pursued:** general transformers on XDNA1. Every CPU island in the middle of a block pays the dispatch floor.
 
 ## Needs a decision: duplicated history on `main`
 
