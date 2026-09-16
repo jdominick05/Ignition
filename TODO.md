@@ -1,6 +1,6 @@
 # Ignition TODO
 
-State of `main` on 2026-09-14 (version 0.3.1). Measured figures name the commit whose message records the run;
+State of `main` on 2026-09-16 (version 0.3.2). Measured figures name the commit whose message records the run;
 Ignition does not track benchmark logs (`results/` is gitignored). How the pipeline works is in the
 [performance notes](docs/PERFORMANCE.md#how-a-frame-runs).
 
@@ -116,12 +116,9 @@ ignite-xdna's `tools/model_zoo_bench.py` drives Ignition for the suites. Measure
 On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.64 ms, in a separate sitting
 (ignite-xdna `results/aie/model_zoo_main_phoenix_20260914T2209Z.log`).
 
-- [ ] Raise the `npu` extra's minimum to the first ignite-xdna release that ships `pipelines/sr_pipeline.py` and
-  `pipelines/pose_pipeline.py`, which Ignition's super-resolution and pose paths import; no ignite-xdna release has
-  them yet.
-- [ ] YOLO11n on the NPU needs ignite-xdna from source at `0be9132` or later, and `d223e7b` or later to keep only the
-  attention core on the CPU; no ignite-xdna release has host segments. Raise the `npu` extra's minimum when one
-  does, with the super-resolution item above.
+- [x] The `npu` extra requires ignite-xdna 0.3.0 (ignite-xdna `554ab57`), the first ignite-xdna release with
+  `pipelines/sr_pipeline.py`, `pipelines/pose_pipeline.py` and host segments, which Ignition's super-resolution, pose
+  and YOLO11n paths import.
 - [ ] YOLO11n's attention core, two matrix multiplies and a softmax, runs on the CPU (0.51–0.53 ms per frame);
   the engine has no softmax or activation-by-activation multiply, so running it on the NPU is ignite-xdna work.
   The block cannot be dropped: the C2PSA-ablated `yolo11n_no_c2psa` finds nothing on `bus.jpg`
@@ -214,8 +211,8 @@ YOLOv8n on the 8-core, 16-thread Ryzen 7 8700G has been measured ([performance n
 - [ ] Measure the modes on a 6-core part (with the Hawk Point run in §3) before calling their sizing verified.
 - [ ] Decide whether `efficiency` should also switch the NPU's own power mode (`xrt-smi configure --pmode`, 0.8 GHz in
   `powersaver`). It is device-wide, so it would slow every other NPU application until put back.
-- [ ] `--power-mode` needs an ignite-xdna with `pipelines/power.py`; raise the `npu` extra's minimum with the items in §1.
-  An older ignite-xdna ignores the mode and prints no power line.
+- [x] `--power-mode` needs an ignite-xdna with `pipelines/power.py`: the `npu` extra now requires ignite-xdna 0.3.0,
+  which has it. An older ignite-xdna ignores the mode and prints no power line.
 
 ## Needs a decision: duplicated history on `main`
 
