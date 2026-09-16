@@ -238,8 +238,16 @@ the models have been measured, on the 8-core, 16-thread Ryzen 7 8700G only ([per
   flat out. Ignition then ran slower than AMD's stack in the same mode, and the setting slows every NPU application.
 - [x] Decide whether any power mode should switch the NPU's device-wide mode. The maintainer's decision
   (2026-09-16): yes. Nothing switches it yet.
-- [ ] Design and build that switch. What it must respect, from the measurement: it pays only while the frame rate is
-  capped, it roughly doubles latency, it is device-wide, and a crashed process must not leave the NPU slowed.
+- [x] Design and build that switch (recorded in the commit that adds this entry; ignite-xdna's
+  `pipelines/npu_power.py`, in no release yet). With `--power-mode efficiency` and paced frames, `--npu-power auto`
+  (the default) lowers the device to `powersaver` at the end of warm-up if the predicted frame fits 80 % of its period,
+  the device reads `default` and no other process uses the NPU. It restores `default` on slow frames, on another
+  process's context and on exit, and a lease file covers a killed run. At 30 fps it saved 20 % and 28 % energy per frame in two sittings on
+  YOLOv8n and 27 % on YOLO11n, for about twice the G2G ([performance notes](docs/PERFORMANCE.md#efficiency-with-the-npu-power-switch)).
+- [ ] Measure the switch on a webcam with `--fresh`, where the frame period comes from the camera's measured rate;
+  only `--max-fps` has been measured.
+- [ ] Price the NPU's `balanced` device mode as an intermediate step for models that do not fit `powersaver` (YOLOv8s at
+  30 fps), which the switch does not use.
 - [ ] ignite-xdna `fbd53f5` is on its `main` but in no release. It puts a container's CPU step (YOLO11n's attention
   core) under the power mode; ignite-xdna 0.3.0, which the `npu` extra requires, still spins those threads in every
   mode. The maintainer chose not to release for it (2026-09-16), so it ships with the next release.

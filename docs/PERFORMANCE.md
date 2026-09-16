@@ -207,7 +207,31 @@ Ignition's power modes change only how its host threads wait. The NPU also has a
 - **Flat out it saves nothing:** 110.0, 110.4 and 110.5 mJ per frame, while the frame rate falls from 109.3 to 72.2 and 56.1 per second.
 - **`balanced` is not separated from `default`:** its two runs straddle `default`'s for both stacks.
 - **At equal device mode Ignition still spends less than AMD's stack at 30 fps:** 153.1 against 179.1 mJ in `default` and 131.8 against 145.1 in `powersaver`.
-- **What Ignition does:** no power mode switches the device. `efficiency` already spends about 15 % less than AMD's stack at 30 fps in `default`, so the switch would trade twice the latency, and every other NPU application's speed, for 14 % energy only while the frame rate is capped.
+- **What Ignition does with it:** at the maintainer's decision, `efficiency` now lowers the device to `powersaver` itself, with the conditions and safeguards in [`--npu-power`](USAGE.md#2-measure-it-on-your-machine). The measurements below.
+
+#### `efficiency` with the NPU power switch
+
+Measured on 2026-09-16 (UTC) with ignite-xdna's governor (`pipelines/npu_power.py`, in no release yet) and Ignition's `--npu-power`. Two energy sittings ran at 30 fps with 1,200 frames per run. Every arm started with the device reading `Default` and no hardware contexts, and energy is against each sitting's median idle, 35.11 and 34.77 W. Records: ignite-xdna's `results/aie/energy_npu_power_governor_phoenix_20260916T2221Z.log`, `results/aie/energy_npu_power_watcher_phoenix_20260916T2240Z.log` and, for the behaviour checks, `results/aie/npu_power_governor_silicon_phoenix_20260916T2217Z.log`.
+
+| Sitting | Model | Stack | Mean G2G | Energy per frame |
+|---|---|---|---:|---:|
+| 1 | YOLOv8n | AMD Ryzen AI Software 1.7.1 | 10.85 / 10.80 ms | 215.7 / 183.4 mJ |
+| 1 | YOLOv8n | Ignition, `efficiency`, `--npu-power off` | 9.61 / 9.55 ms | 166.2 / 177.1 mJ |
+| 1 | YOLOv8n | Ignition, `efficiency`, `--npu-power auto` | 18.19 / 18.14 ms | 141.6 / 132.4 mJ |
+| 1 | YOLO11n | AMD Ryzen AI Software 1.7.1 | 37.29 / 37.21 ms, at 26.8 fps | 1,358.0 / 1,356.9 mJ |
+| 1 | YOLO11n | Ignition, `efficiency`, `--npu-power off` | 12.28 / 12.27 ms | 200.1 / 213.0 mJ |
+| 1 | YOLO11n | Ignition, `efficiency`, `--npu-power auto` | 22.49 / 22.47 ms | 154.0 / 148.2 mJ |
+| 2 | YOLOv8n | Ignition, `efficiency`, `--npu-power off` | 9.58 / 9.56 ms | 167.8 / 170.9 mJ |
+| 2 | YOLOv8n | Ignition, `efficiency`, `--npu-power auto` | 18.22 / 18.14 ms | 122.3 / 121.5 mJ |
+
+- **At a camera's rate the switch saved YOLOv8n 20 % in sitting 1 and 28 % in sitting 2, and YOLO11n 27 %:** 137.0 against 171.6 and 121.9 against 169.4 mJ on YOLOv8n's means, 151.1 against 206.6 on YOLO11n's. Every `auto` run read below both `off` runs of its sitting. G2G roughly doubles, and stays inside the 33.3 ms frame period.
+- **Against AMD's stack at 30 fps:** YOLOv8n spends 137.0 mJ against 199.6 in the same sitting, 31 % less, with AMD's device in `default`; YOLO11n 151.1 against 1,357.4, 9.0 times less.
+- **The switch's background check costs no measured energy.** It runs `xrt-smi` every 5 s to see whether another application opened the NPU. In the second sitting the same run with that check every 5 s, every 30 s and never spent 122.3 / 121.5, 127.1 / 131.8 and 120.4 / 125.9 mJ, which do not separate. (Sitting 1 suggested a cost, 124.3 / 125.6 mJ without the check against 141.6 / 132.4 with it, but its switched arms read about 15 mJ above sitting 2's while its `off` arms matched, which is unexplained; compare arms only within a sitting.)
+- **Behaviour on the NPU:**
+  - YOLOv8n and YOLO11n at 30 fps lowered the device at the end of warm-up (predicted G2G 18.3 and 22.8 ms). It read `Powersaver` mid-run and `Default` after exit, including after Ctrl+Break.
+  - YOLOv8s at 30 fps kept `default` (predicted 39.0 ms), and so did `balanced`, an unpaced run and `--npu-power off`.
+  - A second NPU application started mid-run made the running one restore `default` within its 5 s check.
+  - After a hard kill left the device in `powersaver`, `ignition devices --restore-npu-power` put it back.
 
 ## How a frame runs
 

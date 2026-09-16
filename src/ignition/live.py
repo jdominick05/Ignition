@@ -498,6 +498,11 @@ def parse_args(argv=None) -> argparse.Namespace:
                          "performance spins them on every logical processor, balanced sleeps them between frames with "
                          "one per physical core, efficiency sleeps them with a quarter of the physical cores "
                          "(default: IGNITE_XDNA_POWER_MODE if set, else balanced)")
+    ap.add_argument("--npu-power", choices=("auto", "off"), default=None,
+                    help="with --power-mode efficiency and paced frames (--max-fps, or a webcam with --fresh), lower "
+                         "the NPU's own device-wide power mode to powersaver when the frame still fits its period and "
+                         "no other application uses the NPU, and put it back on exit; off never touches it (default: "
+                         "IGNITE_XDNA_NPU_POWER if set, else auto)")
     ap.add_argument("--max-fps", type=float, default=0.0,
                     help="process at most this many frames per second, waiting between frames; the wait is not part "
                          "of G2G (default 0: as fast as the source and model allow)")
@@ -515,6 +520,24 @@ def select_power_mode(mode: Optional[str]) -> None:
         os.environ["IGNITE_XDNA_POWER_MODE"] = mode
 
 
+def select_npu_power(value: Optional[str]) -> None:
+    """Hand --npu-power to ignite-xdna's NPU power-mode governor."""
+    if value:
+        os.environ["IGNITE_XDNA_NPU_POWER"] = value
+
+
+def npu_power_governor(power: Optional[Dict[str, Any]], period_s: float):
+    """ignite-xdna's governor of the NPU's own power mode for this run, or None before ignite-xdna had one.
+
+    Creating it also puts back a power mode that an earlier run, which is no longer running, left lowered."""
+    try:
+        from ignite_xdna.pipelines.npu_power import NpuPowerGovernor
+    except ImportError:
+        return None
+    mode = (power or {}).get("mode", "balanced")
+    return NpuPowerGovernor(mode, period_s, log=lambda line: print(f"[Ignition] {line}", flush=True))
+
+
 def power_settings() -> Optional[Dict[str, Any]]:
     """The power mode ignite-xdna's native preprocessor loaded with; None before ignite-xdna had power modes."""
     try:
@@ -528,6 +551,7 @@ def power_settings() -> Optional[Dict[str, Any]]:
 def main(argv=None) -> int:
     args = parse_args(argv)
     select_power_mode(args.power_mode)
+    select_npu_power(args.npu_power)
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout, force=True)
     stop = StopRequest()
     stop.install()
@@ -578,6 +602,12 @@ def main(argv=None) -> int:
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
     period = 1.0 / args.max_fps if args.max_fps > 0 else 0.0
     t_schedule: Optional[float] = None
+    governor = npu_power_governor(power, period) if native else None
+    # The NPU power mode is decided once, at the end of warm-up (at least 10 frames), from the frames after the cold
+    # first one; a webcam paced by --fresh also needs 2 s of arrivals to know its rate.
+    decide_at = max(args.warmup, 10)
+    warm_g2g: List[float] = []
+    warm_dispatch: List[float] = []
     try:
         while True:
             if stop.requested:
@@ -608,6 +638,24 @@ def main(argv=None) -> int:
             processed += 1
             if processed == 1:
                 cold_ms = t["total_ms"]
+            if governor is not None and governor.state == "not evaluated":
+                if processed >= 2 and "dispatch_ms" in t:
+                    warm_g2g.append(t.get("g2g_ms", t["total_ms"]))
+                    warm_dispatch.append(t["dispatch_ms"])
+                pace, ready = period, processed >= decide_at and bool(warm_dispatch)
+                if ready and not pace and args.fresh and source.kind == "camera":
+                    frames_read, repeats, span = source.rates()
+                    if span >= 2.0 and frames_read - 1 - repeats > 0:
+                        pace = span / (frames_read - 1 - repeats)
+                    elif processed < 1000:
+                        ready = False
+                if ready:
+                    governor.period_s = pace
+                    g_mean, d_mean = float(np.mean(warm_g2g)), float(np.mean(warm_dispatch))
+                    governor.consider(cpu_ms=g_mean - d_mean, dispatch_ms=d_mean, frame=processed)
+                    print(f"[Ignition] NPU power mode: {governor.describe()}", flush=True)
+            elif governor is not None and governor.state == "lowered":
+                governor.observe(t.get("g2g_ms", t["total_ms"]))
             if processed > args.warmup:
                 timed += 1
                 if timed == 1:
@@ -659,6 +707,8 @@ def main(argv=None) -> int:
         if window:
             cv2.destroyAllWindows()
             cv2.waitKey(1)
+        if governor is not None:
+            governor.restore("session end")
         pipeline.close()
         print("[Ignition] shutdown: source released, window closed, NPU hardware context released", flush=True)
 
@@ -671,6 +721,9 @@ def main(argv=None) -> int:
         "frames_requested": args.frames, "warmup": args.warmup, "frames_processed": processed, "frames_timed": timed,
         "stop_reason": stop_reason, "host": host_info(), "max_fps": args.max_fps, "power_mode": power,
     }
+    if governor is not None:
+        print(f"[summary] NPU power mode: {governor.describe()}", flush=True)
+        record["npu_power"] = governor.status()
     if source.kind == "camera":
         frames, repeats, span = source.rates()
         if frames > 1 and span > 0:

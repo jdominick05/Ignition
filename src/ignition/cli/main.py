@@ -24,8 +24,18 @@ def cli():
 
 
 @cli.command("devices")
-def list_devices():
+@click.option("--restore-npu-power", is_flag=True,
+              help="Put back an NPU power mode that an Ignition run, no longer running, left lowered; print the mode.")
+def list_devices(restore_npu_power):
     """Probe and display detected AMD XDNA NPU hardware status."""
+    if restore_npu_power:
+        try:
+            from ignite_xdna.pipelines import npu_power
+        except ImportError:
+            click.echo("This ignite-xdna has no NPU power-mode governor (pipelines/npu_power.py); nothing to restore.")
+        else:
+            click.echo(npu_power.recover_stale_lease() or "No NPU power lease to recover.")
+            click.echo(f"NPU power mode: {npu_power.read_mode() or 'unknown (xrt-smi did not report it)'}")
     click.echo("================================================================================")
     click.echo("IGNITION HARDWARE ACCELERATOR PROBE")
     click.echo("================================================================================")
