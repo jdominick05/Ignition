@@ -137,8 +137,12 @@ computing far less with it.
 
 **The escape hatch, and its price.** A region of the graph can be declared a host segment and run on ONNX
 Runtime's CPU provider between two NPU dispatches; SESR's `DepthToSpace` tail works the same way. It is how
-YOLO11n keeps its attention core — two matrix multiplies and a softmax — at **0.51-0.53 ms per frame** and one
-ONNX Runtime call. Use it for a tail or a single exotic block, never for something in the middle of a hot loop.
+YOLO11n keeps its attention core — two matrix multiplies and a softmax — at **0.71-0.73 ms per frame** in the default
+power mode (0.55-0.57 ms in `performance`, whose CPU threads never sleep) and one
+ONNX Runtime call. Keep the region as small as the unsupported ops allow: with YOLO11n's whole C2PSA block on the CPU,
+convolutions included, the same step took 1.95-1.98 ms. The CPU step follows the power mode only with ignite-xdna
+`fbd53f5` or later, which is in no release yet. Use it for a tail or a single exotic block, never for something in the
+middle of a hot loop.
 
 ---
 
