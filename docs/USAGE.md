@@ -87,6 +87,7 @@ python live_ignition.py --headless --frames 300 --json run.json   # also write t
 python live_ignition.py --power-mode efficiency   # the least CPU energy per frame (see Energy per frame in the performance notes)
 python live_ignition.py --power-mode performance --headless --frames 300   # the most frames per second, every core busy
 python live_ignition.py --source examples/assets/bus.jpg --headless --frames 300 --max-fps 30   # process at a camera's rate
+python live_ignition.py --power-mode efficiency --fresh   # webcam: may also lower the NPU's own power mode (see --npu-power)
 ```
 
 | Flag | Meaning |
@@ -98,7 +99,8 @@ python live_ignition.py --source examples/assets/bus.jpg --headless --frames 300
 | `--frames N` | Stop after N timed frames and print the summary (default 0: run until stopped). |
 | `--warmup N` | Untimed frames before the timed ones (default 10). |
 | `--fresh` | Wait for a new camera frame before each inference instead of reusing the newest one. |
-| `--power-mode` | For `.ignite` containers, how the host's threads trade CPU power for speed, sized to your processor: `performance` keeps worker threads spinning on every logical processor (the most frames per second), `balanced` (the default) lets them sleep between frames with one per physical core, `efficiency` sleeps them with a quarter of the physical cores (the least energy). The app prints the mode it applied. `IGNITE_XDNA_POWER_MODE` sets the same thing ([measurements](PERFORMANCE.md#energy-per-frame-against-amds-stack)). A container's CPU step (YOLO11n's attention core) follows the mode only with ignite-xdna `fbd53f5` or later, which is in no release yet. No mode changes the NPU's own device-wide power mode. |
+| `--power-mode` | For `.ignite` containers, how the host's threads trade CPU power for speed, sized to your processor: `performance` keeps worker threads spinning on every logical processor (the most frames per second), `balanced` (the default) lets them sleep between frames with one per physical core, `efficiency` sleeps them with a quarter of the physical cores (the least energy). The app prints the mode it applied. `IGNITE_XDNA_POWER_MODE` sets the same thing ([measurements](PERFORMANCE.md#energy-per-frame-against-amds-stack)). A container's CPU step (YOLO11n's attention core) follows the mode only with ignite-xdna `fbd53f5` or later, which is in no release yet. `efficiency` can also lower the NPU's own power mode; see `--npu-power`. |
+| `--npu-power` | `auto` (the default) or `off`, for `.ignite` containers with ignite-xdna's NPU power-mode governor (in no release yet). With `--power-mode efficiency` and paced frames (`--max-fps`, or a webcam with `--fresh`), the app switches the NPU's device-wide power mode to `powersaver` at the end of warm-up. It does so only if the frame's CPU time plus 2.19 times its NPU dispatch fits 80 % of the frame period, the NPU reads `default`, and no other process uses the NPU. It puts `default` back when frames get too slow, when another process opens the NPU (checked every 5 s), and on exit. The summary says what it did and why. A killed run leaves the NPU slowed until the next run starts or `ignition devices --restore-npu-power` runs. `IGNITE_XDNA_NPU_POWER` sets the same thing. |
 | `--max-fps` | Process at most this many frames per second, waiting between frames the way a camera does; the wait is not part of glass-to-glass time (default 0: as fast as possible). |
 | `--conf`, `--iou` | Detection confidence and NMS IoU thresholds (defaults 0.25 and 0.45). |
 | `--open-timeout` | Seconds allowed for each camera backend to open (default 8). |
@@ -123,6 +125,7 @@ with ignition.compile("../ignite-xdna/build/yolov8n_full.ignite", pipeline="yolo
 
 ```bash
 ignition devices
+ignition devices --restore-npu-power   # put back an NPU power mode a killed run left lowered
 ignition detect ../ignite-xdna/build/yolov8n_full.ignite --input examples/assets/bus.jpg --output detections.jpg
 ignition detect ../ignite-xdna/build/yolov8n_full.ignite --input examples/assets/bus.jpg --stream --benchmark --frames 100
 ```
