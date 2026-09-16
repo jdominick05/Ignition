@@ -167,9 +167,15 @@ The gap is wider on other models. In one sitting AMD's `session.run` took 13.14�
 16.70–16.74 ms dispatch, and 1.46–1.47 ms on SESR M7 against 4.39–4.41 ms, so AMD's stack is faster end to end on
 both: 16.95–16.96 against 17.24–17.27 ms, and 3.63–3.65 against 6.66–6.67 ms ([performance notes](docs/PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)).
 
-- [ ] Keep activations on the NPU between layers in ignite-xdna (SESR M7's target needs the same change),
-  then re-run the AMD comparison in one sitting.
-- **Done when:** Ignition's NPU stage is no slower than AMD's in a same-sitting run.
+- [x] **Keep data on the NPU between layers: tried in ignite-xdna, and closed as a known limitation on YOLOv8s
+  (2026-09-16).** The target was Ignition's NPU stage no slower than AMD's in a same-sitting run. Holding activations
+  in the MemTile (an activation ring) and holding weights there (a resident weight buffer) were both built, both
+  byte-exact, and 3.40 and 3.63 ms slower on YOLOv8s. A MemTile hop costs no measurable time per byte, so routing
+  around it gains nothing, and trimming packets, fuller fill tasks, hardware compression and core-to-core halo
+  exchange are unavailable, parked or need a kernel change (ignite-xdna `078769a`,
+  `results/aie/weight_buffer_phoenix_20260916T1508Z.log`, `results/aie/memtile_hop_phoenix_20260916T1523Z.log`).
+  The traffic that remains is cut by model shape ([model guide](docs/QUANTIZATION-GUIDE.md#what-the-runtime-cannot-take-off-the-bill)).
+  SESR M7's dispatch target in §1 is not closed by this.
 
 ### 5. Compile time (ignite-xdna)
 

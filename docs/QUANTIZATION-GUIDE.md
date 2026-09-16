@@ -18,6 +18,11 @@ while moving about **67 MB of activations per frame**. And on a pure matrix mult
 **46.53 MACs/cycle/core out of 256 — 18.2 %** of its ceiling. Arithmetic is the resource you have spare. Bytes
 are the resource you are spending.
 
+And the runtime cannot spend fewer of them for you. Keeping activations or weights on the chip so they are
+fetched from DDR less often was built twice, byte-exact both times, and was **3.40 ms and 3.63 ms slower** on
+YOLOv8s. Taking the MemTile out of the path would save nothing either: a MemTile hop costs no measurable time
+per byte. Cutting the bytes is the model's job ([§1](#what-the-runtime-cannot-take-off-the-bill)).
+
 ---
 
 ## 1. What a frame actually pays for
@@ -38,10 +43,26 @@ The geometry is the same for every model:
 | Cores | 4 columns x 4 rows |
 | DMA repeat limit | 64 per shim task |
 
-Two multipliers follow from that geometry, and they are what you design against:
+Three multipliers follow from that geometry, and they are what you design against:
 
 **Fills run about 4x the input tensor.** Each core's 6,400 B packet carries its own halo rows, so neighbouring
-tiles re-read the pixels they share. Every SESR layer fetches 4,326,400 B to consume a 1,065,024 B input.
+tiles re-read the pixels they share. Seven of SESR's nine layers fetch 4,326,400 B to consume a 1,065,024 B
+input; the other two fetch twice that, for the reason below and for a residual operand.
+
+**A packet is 6,400 B whatever the kernel touches, and the kernel size decides how much of it is slack.**
+
+| Convolution | Input channels per packet | Share of each packet plane the kernel never reads |
+|---|---:|---:|
+| 3x3 stride 1 | 32 | 23 % |
+| 3x3 stride 2 | 8 | 42 % |
+| 5x5 stride 1 | 8 | 73 % |
+
+A 5x5 convolution at stride 1 has to split its input one 8-channel block per packet, because its 25 taps of
+256 weights fill 6,400 of the 9,216 bytes a weight packet carries. On a 32-channel input it therefore fetches
+four times the packets of a 3x3, and three quarters of each is never read. SESR's 5x5 tail fetches 8,652,800 B
+where its 3x3 layers fetch 4,326,400. The slack cannot be trimmed at run time: a transfer's length is the packet
+size, and a smaller packet multiplies packets faster than it saves bytes (DERIVED: at 4,032 B, YOLOv8n would save
+0.38 ms of transport and spend 0.69 ms issuing the extra tasks).
 
 **Drains pad to four blocks.** A layer with 16 channels is two real blocks padded to four, so **half of its
 drained bytes are junk planes**. Removing them inside the kernel was tried and abandoned: the wider accumulator
@@ -62,6 +83,28 @@ Read the SESR row again: nine layers, no depth, no width — and the worst traff
 is also the one model class where AMD's stack still wins outright, 3.65 ms against 6.67 ms
 ([measurements](PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)). Nine layers at 256x256x16 is the shape
 to avoid.
+
+### What the runtime cannot take off the bill
+
+YOLOv8s is the other model AMD's stack wins, narrowly: **16.95 ms against 17.24 ms** in the same sitting
+([measurements](PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)). The gap is inside the NPU stage — AMD's
+`session.run` took 13.14 ms against Ignition's 16.70 ms dispatch — and Ignition's host work wins most of it back.
+Its 237.7 MB of fills per frame are the price, and that is now a **known limitation of this runtime**, not an
+open item. Every way of moving fewer bytes without changing the model was tried in ignite-xdna, and none
+survived:
+
+| Tried in the runtime | Result |
+|---|---|
+| Hold activations in the MemTile, so one fetch serves several output groups | Byte-exact, **3.40 ms slower** on YOLOv8s |
+| Hold each layer's weights in the MemTile instead of re-sending them every round | Byte-exact, **3.63 ms slower** on YOLOv8s and 1.16 ms slower on YOLOv8n |
+| Route activations around the MemTile | Nothing to gain: a MemTile hop measured under 0.001 ms per MB against a direct path |
+| Trim each packet to what the kernel reads | Not possible without shrinking every packet, which costs more in tasks than it saves (DERIVED) |
+| Compress weights in the MemTile's hardware codec | Works on this part, but stalls on every data pattern tried except a ramp; parked |
+| Pass halo rows between neighbouring cores | Reaches one halo row of two, and needs a kernel change; not built |
+
+The same effort spent on the model moves further: halving the input side quarters the fills ([§3](#3-shape-rules-that-cost-nothing-to-follow)).
+The measurements are in ignite-xdna's
+[BENCHMARKS.md](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#memtile-residency-does-not-pay-on-the-graph-engine-and-the-yolov8s-gap-is-a-known-limitation-2026-09-16-desktop-2).
 
 ---
 
@@ -209,6 +252,7 @@ where the task genuinely needs it**.
 | Pad 16 channels to 32 | **Free** — the junk planes are drained either way |
 | Add a layer at low resolution | Cheap: one more pass over a small map |
 | Add a layer at full resolution | Expensive: fills run about 4x the tensor |
+| Use a 5x5 convolution at stride 1 | One packet per 8 input channels instead of 32: up to 4x a 3x3's fills, 73 % of each plane never read |
 | Move a block to the host | About 0.5 ms per frame and one ONNX Runtime call, and the container stops being pure NPU |
 
 ---
@@ -222,7 +266,9 @@ where the task genuinely needs it**.
    run all 5,000 COCO images; single-image impressions have been wrong here before.
 3. **Latency in one quiet sitting**, with the NPU idle before each run (`xrt-smi examine -r aie-partitions`) and
    runs interleaved against whatever you are comparing with. Latency drifts between sessions on a shared machine
-   with no code change, so only within-sitting comparisons mean anything.
+   with no code change, so only within-sitting comparisons mean anything. And measure a byte saving rather than
+   pricing it: two runtime changes whose saved bytes predicted gains of 0.75 and 0.73 ms on YOLOv8s measured
+   3.40 and 3.63 ms slower.
 
 ---
 
@@ -233,6 +279,7 @@ where the task genuinely needs it**.
 - [ ] No feature map is narrower than 20 px, and spatial sizes divide 20 and 5 where they can.
 - [ ] Resolution drops early; depth and width come after the first downsample.
 - [ ] No depthwise or grouped convolutions in the hot path.
+- [ ] 5x5 convolutions at stride 1 only where a 3x3 cannot do the job, and never on a wide full-resolution input.
 - [ ] No softmax, no cross-branch multiply at mismatched scales, no bilinear upsample.
 - [ ] Activations are ReLU or HardSwish, and clamping is power-of-two in the forward pass.
 - [ ] Calibration data looks like the deployment, at 32-64 images.
