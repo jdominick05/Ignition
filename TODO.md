@@ -87,6 +87,14 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   needs work. In one sitting AMD's stack took 16.954 and 16.958 ms on YOLOv8s against Ignition's 17.240 and 17.265 ms,
   and 3.654 and 3.632 ms on SESR M7 against 6.671 and 6.662 ms (ignite-xdna
   `results/aie/yolov8s_sesr_vs_amd_phoenix_20260915T2146Z.log`).
+- [x] **Energy per frame against AMD's stack, and power modes** (recorded in the commit that adds this entry): the
+  first energy comparison found every NPU run spinning all 16 hardware threads between frames, because the setting
+  meant to stop it never reached MSVC's OpenMP runtime. ignite-xdna fixed that and added host-sized power modes, which
+  `live_ignition.py --power-mode` and `ignition suite --power-mode` select; `--max-fps` paces the loop like a camera. On
+  YOLOv8n at 30 frames per second the default `balanced` mode spent 196.9 and 178.7 mJ per frame and `efficiency`
+  170.3 and 159.1 mJ, against 217.6 and 200.4 mJ on AMD's stack and 1,384.8 and 1,371.8 mJ for the old spinning
+  behaviour, now `performance` (ignite-xdna `results/aie/energy_power_modes_paced30_yolov8n_phoenix_20260916T1702Z.log`,
+  [performance notes](docs/PERFORMANCE.md#energy-per-frame-against-amds-stack)).
 
 ## Active
 
@@ -192,6 +200,22 @@ lowering and scheduling (0–1.9 s), `clang++` compiling `engine.cc` (1.9–4.9 
   - find which of `aiecc`'s steps take its 8 s, and run the ones that can be split in parallel.
 - **Done when:** a compile keeps more than one core busy for most of its wall-clock time, is faster than a serial
   compile of the same model on the same host, and writes `insts.bin` and `wpackets.bin` byte-identical to it.
+
+### 6. Energy and power modes
+
+Power modes size the host's worker threads to its own cores: `performance` spins every logical processor,
+`balanced` (the default) sleeps one per physical core, `efficiency` sleeps a quarter of the physical cores. Only
+YOLOv8n on the 8-core, 16-thread Ryzen 7 8700G has been measured ([performance notes](docs/PERFORMANCE.md#energy-per-frame-against-amds-stack)).
+
+- [ ] Re-measure the latency comparisons against AMD's stack in the `balanced` default: every latency badge and table
+  was measured with spinning threads, which is `performance` now, and `balanced` gave up about 0.46 ms per frame on
+  YOLOv8n.
+- [ ] Measure energy per frame at 30 fps and at full speed on YOLOv8s, SESR M7, YOLOv8n-pose and YOLO11n.
+- [ ] Measure the modes on a 6-core part (with the Hawk Point run in §3) before calling their sizing verified.
+- [ ] Decide whether `efficiency` should also switch the NPU's own power mode (`xrt-smi configure --pmode`, 0.8 GHz in
+  `powersaver`). It is device-wide, so it would slow every other NPU application until put back.
+- [ ] `--power-mode` needs an ignite-xdna with `pipelines/power.py`; raise the `npu` extra's minimum with the items in §1.
+  An older ignite-xdna ignores the mode and prints no power line.
 
 ## Needs a decision: duplicated history on `main`
 
