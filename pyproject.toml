@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ignition-ai"
-version = "0.3.2"
+version = "0.3.3"
 description = "High-performance ergonomic inference engine for AMD Ryzen AI XDNA1 NPUs"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,7 +36,7 @@ dependencies = [
 # The native .ignite path. ignite-xdna is not on PyPI: install its wheel from the
 # same release page (or `pip install -e` a checkout) alongside this extra.
 npu = [
-    "ignite-xdna>=0.3.0",
+    "ignite-xdna>=0.3.1",
 ]
 dev = [
     "pytest>=7.0.0",
