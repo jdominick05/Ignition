@@ -119,7 +119,7 @@ them.
 - 2x nearest-neighbour upsample, fused into the consumer's input.
 - Max pool (the 5x5 SPPF pool; pooling forces a halo of 2).
 - Residual add, including the per-operand left shifts that wider models need, and a HardSwish applied after the add
-  (built for a split convolution; no model uses it yet).
+  (built for a split convolution; no model uses it yet, and it stays in the program for one that does).
 - Concat and slice, ReLU as an integer epilogue, and the HardSigmoid-and-multiply form the quantizer emits in
   place of SiLU. That form is not free: on YOLO-World v2 the swap alone costs 11 points of mAP in FP32 (41.5 to 30.5 %
   on the first 500 COCO images).

@@ -300,6 +300,16 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
   the NPU instead: 24.7 %, exact on every layer, and a profiled frame of 48.0-48.2 ms against 53.0-53.5 ms for the
   FP32-step container in the same sitting. The profile quantizes the input and dequantizes the heads in numpy, and it is
   not a sitting against AMD's stack (ignite-xdna `results/aie/yolow_gptq/`).
+  **Against AMD's stack in one sitting** (ignite-xdna `1c9364e`, `460324f`; `5_eval_map.py` per-image inference on the
+  first 300 images, interleaved):
+  - the container 47.33 and 47.51 ms at 24.7 %;
+  - AMD's stack on the FP32-step model, its best usable one, 95.91 and 95.89 ms at 24.5 %: so 2.0 times AMD at equal
+    accuracy;
+  - but DirectML on the iGPU runs the FP32 model at 46.22 ms at 43.0 %, with every node on DirectML;
+  - the CPU runs it at 67.75 ms at 43.0 %.
+
+  No README row or badge until the container clearly beats the iGPU on speed or energy (ignite-xdna
+  `results/aie/yolow_sitting_vs_amd/`).
 - [ ] Mixed precision for MobileViT-XXS: not tried. At its 224 px input the maps fall below the 20 px tile.
 - [ ] Per-channel weight scales, which AMD's stack rejects. **Answered (ignite-xdna `engine.cc`):** a weight packet
   carries one output shift for its 32 output channels and a per-channel int32 bias, so per-channel weight scales are a
@@ -309,9 +319,12 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
 - [ ] **Open-vocabulary detection in Ignition.** ignite-xdna `6a39780`..`a78a500`: one YOLO-World v2 container takes
   any class names at run time, because the vocabulary enters only its CPU attention steps and the host decode
   (`YoloWorldPipeline.set_classes`, 90.1 ms for six names; 70/70 layers exact with another vocabulary). Renaming 23
-  COCO categories to synonyms cost the quantized model 22 % of their mAP against 11 % in FP32. To do: `--task world
-  --classes` in `live_ignition.py` and `ignition suite`, a native contrastive decode (10.9 ms of numpy today), then a
-  sitting against AMD's stack and the CPU.
+  COCO categories to synonyms cost the quantized model 22 % of their mAP against 11 % in FP32. To do, in order:
+  - a native contrastive decode (10.9 ms of numpy today) and native ingress in the timed path, the levers to get clearly
+    past the iGPU (level on speed in the sitting above);
+  - energy per frame against AMD's stack, the CPU and the iGPU;
+  - `--task world --classes` in `live_ignition.py` and `ignition suite`;
+  - a sitting through Ignition.
 
 **Kernel decisions (the one-program rule: the maintainer decides, with measured sizing):**
 - [ ] Maps smaller than the 20 px tile: classifiers, and 28 of ResNet50's 53 convolutions.
