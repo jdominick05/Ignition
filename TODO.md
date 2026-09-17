@@ -275,6 +275,9 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
   (YOLO-World v2: 63 of its 67 convolutions on the NPU).
 - **Newer releases.** In this project's testing, Ryzen AI 1.8 installed without the Phoenix xclbin and rejected the
   driver's XDNA1 xclbins, so XDNA1 users stay on 1.7.1 ([amd/RyzenAI-SW#400](https://github.com/amd/RyzenAI-SW/issues/400)).
+- **SiLU's HardSigmoid form.** AMD's XINT8 replaces every SiLU's sigmoid with a HardSigmoid. On the first 500 COCO
+  images, the form alone is 64.8-74.8 % of the XINT8 accuracy loss of YOLOv8n, YOLOv8s and YOLOv8n-pose. The graph
+  engine now has a four-line sigmoid instead, as an option (Kernel decisions, below).
 - **The class that fits.** The engine's tile is 20 px, which is the deepest map of a network at a 640 input
   (stride 32). Dense-prediction models at 640 fit: detection, segmentation, pose, depth, matting and
   super-resolution. Classifiers at 224 shrink to 7 px and do not.
@@ -347,6 +350,23 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
   - a sitting through Ignition.
 
 **Kernel decisions (the one-program rule: the maintainer decides, with measured sizing):**
+- [x] **A better SiLU than AMD's HardSigmoid form** (ignite-xdna `94305cf`..`4b238a7`, approved by the maintainer).
+  `ignite-compile --silu-sigmoid` gives every SiLU a four-line sigmoid, which the core program applies after the
+  convolution passes. Every layer is exact on the NPU against an integer reference model. Containers compiled without
+  the flag are byte-identical to before and no slower.
+  - **Accuracy, all 5,000 COCO val2017 images** (mAP; pose OKS): AMD's stack 26.68 / 37.31 / 32.64, today's containers
+    27.10 / 37.21 / 32.71, sigmoid containers 34.12 / 42.37 / 44.16 for YOLOv8n / YOLOv8s / YOLOv8n-pose.
+  - **Glass-to-glass, one sitting** (ms, means of two runs of `bus.jpg`): AMD's stack 10.741 / 16.986 / 12.340, today's
+    containers 8.419 / 18.008 / 9.006, sigmoid containers 8.723 / 18.427 / 9.324. The flag costs 2.2-3.9 % of the NPU
+    dispatch.
+  - **Energy at 30 fps:** YOLOv8n does not separate from AMD's stack. YOLOv8n-pose spends less than AMD's stack and
+    YOLOv8s more, with or without the flag.
+  - **It stays opt-in.** YOLO11n and YOLO-World v2 cannot use it (their CPU segments), and SESR M7 has no SiLU.
+
+  Still to decide: whether Ignition's documented YOLOv8n and pose containers are compiled with the flag. That would
+  move the README's latency figures by about 0.3 ms, still ahead of AMD's stack, for 7.4 and 11.5 more points. It
+  would also be a release candidate under the "release on a measured win against AMD" rule. Evidence: ignite-xdna
+  `results/aie/silu_sigmoid_vs_amd/`.
 - [ ] Maps smaller than the 20 px tile: classifiers, and 28 of ResNet50's 53 convolutions.
 - [ ] An INT16-activation kernel, for models that collapse at 8 bits.
 - [ ] Dilated and transposed convolutions, for segmentation and depth decoders.
