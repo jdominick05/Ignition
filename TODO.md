@@ -336,7 +336,11 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
   - [x] a faster decode and native ingress in the timed path (ignite-xdna `a62450d`: bit-exact int8 decode, 40.1 ms
     glass-to-glass with 80 classes);
   - [x] energy per frame against AMD's stack, the CPU and the iGPU (above);
-  - the NPU's power-saving mode at 5 fps, where the iGPU spends less (running);
+  - [x] the NPU's power-saving mode at 5 fps, where the iGPU spends less (ignite-xdna `c714629`). The container in
+    `efficiency` with the NPU in `powersaver` spends 1086.27 / 1060.09 mJ per frame against 1364.78 / 1489.51 mJ in its
+    defaults (20-29 % less against each arm's own idle, at most 19 % against the median idle). That costs 1.71 times
+    the frame time: 69.1-69.3 against 40.5 ms. The iGPU still spends 651.69 / 684.28 mJ, though its paced frames take
+    79.6 ms. No power-mode default changes;
   - the accuracy gap to FP32 (24.7 against 43.0 %), which decides whether the iGPU comparison can ever be like for
     like;
   - `--task world --classes` in `live_ignition.py` and `ignition suite`;
