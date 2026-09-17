@@ -310,6 +310,19 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
 
   No README row or badge until the container clearly beats the iGPU on speed or energy (ignite-xdna
   `results/aie/yolow_sitting_vs_amd/`).
+
+  **Frame to detections and energy per frame** (ignite-xdna `a62450d`..`469c9d5`: a bit-exact int8 decode, then
+  `pipelines/yolow/4b_g2g.py` on `bus.jpg`, 500 frames per run, interleaved):
+  - **Latency, 80 classes:** container 39.912 / 39.853 ms, AMD's stack 109.729 / 109.376 ms (2.75 times), iGPU FP32
+    52.415 ms, CPU FP32 81.593 ms.
+  - **Latency, five names:** container 32.595 ms, iGPU 28.444 ms.
+  - **Energy per frame, flat out** (`tools/energy_sitting.py`, own idle): container 1040.36 / 908.91 mJ, AMD's stack
+    4483.41 / 4544.51 mJ, iGPU 1201.12 / 1336.00 mJ, CPU 3610.19 / 3580.88 mJ.
+  - **Energy per frame at 5 fps:** 1428.13, 5337.04, 842.48 and 4214.34 mJ.
+
+  So against AMD's stack the container is both faster and cheaper at equal accuracy. It beats the iGPU flat out with
+  80 classes, but not with five classes or at 5 fps, and stays 18.3 points less accurate: no README row or badge yet
+  (ignite-xdna `results/aie/yolow_g2g_sitting/`, `results/aie/yolow_energy/`).
 - [ ] Mixed precision for MobileViT-XXS: not tried. At its 224 px input the maps fall below the 20 px tile.
 - [ ] Per-channel weight scales, which AMD's stack rejects. **Answered (ignite-xdna `engine.cc`):** a weight packet
   carries one output shift for its 32 output channels and a per-channel int32 bias, so per-channel weight scales are a
@@ -320,9 +333,12 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
   any class names at run time, because the vocabulary enters only its CPU attention steps and the host decode
   (`YoloWorldPipeline.set_classes`, 90.1 ms for six names; 70/70 layers exact with another vocabulary). Renaming 23
   COCO categories to synonyms cost the quantized model 22 % of their mAP against 11 % in FP32. To do, in order:
-  - a native contrastive decode (10.9 ms of numpy today) and native ingress in the timed path, the levers to get clearly
-    past the iGPU (level on speed in the sitting above);
-  - energy per frame against AMD's stack, the CPU and the iGPU;
+  - [x] a faster decode and native ingress in the timed path (ignite-xdna `a62450d`: bit-exact int8 decode, 40.1 ms
+    glass-to-glass with 80 classes);
+  - [x] energy per frame against AMD's stack, the CPU and the iGPU (above);
+  - the NPU's power-saving mode at 5 fps, where the iGPU spends less (running);
+  - the accuracy gap to FP32 (24.7 against 43.0 %), which decides whether the iGPU comparison can ever be like for
+    like;
   - `--task world --classes` in `live_ignition.py` and `ignition suite`;
   - a sitting through Ignition.
 
