@@ -57,6 +57,16 @@ color = "brightgreen"
 
 [[badge]]
 row = 2
+alt = "YOLOv8n box accuracy on all 5,000 COCO val2017 images, the --silu-sigmoid container and AMD's stack on the same input"
+label = "YOLOv8n COCO boxes"
+file = "docs/PERFORMANCE.md"
+section = "Ignition vs AMD's Ryzen AI stack"
+search = '\| \**Detection accuracy, COCO val2017\** \(mAP@50-95, all 5,000 images\) \| \**([0-9.]+)\** \| \**([0-9.]+)\** \|'
+replace = "$1 vs AMD $2 mAP@50-95"
+color = "blue"
+
+[[badge]]
+row = 2
 alt = "YOLO11n latency per frame through Ignition and AMD's stack, both runs"
 label = "YOLO11n per frame"
 file = "docs/PERFORMANCE.md"
@@ -77,11 +87,11 @@ color = "brightgreen"
 
 [[badge]]
 row = 2
-alt = "YOLOv8n-pose keypoint accuracy on COCO val2017, the container and AMD's stack on the same input"
+alt = "YOLOv8n-pose keypoint accuracy on all 5,000 COCO val2017 images, the --silu-sigmoid container and AMD's stack on the same input"
 label = "YOLOv8n-pose COCO keypoints"
 file = "docs/PERFORMANCE.md"
 section = "YOLOv8n-pose on the NPU"
-search = "its detections were byte-identical to ONNX Runtime's CPU provider's \\(([0-9.]+)\\); AMD's stack was recorded at ([0-9.]+) on that input"
+search = "the container compiled with `--silu-sigmoid` scored ([0-9.]+) OKS mAP@50-95, and AMD's stack ([0-9.]+) on that input"
 replace = "$1 vs AMD $2 OKS mAP@50-95"
 color = "blue"
 

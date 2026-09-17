@@ -17,8 +17,8 @@ worth its hours, and how to validate the result before quoting a number.
 | **Linux** | ❌ Not supported | Ignition uses the Windows XRT stack |
 | **NPU driver and XRT** | ✅ Verified | NPU driver 32.0.20101.3760, firmware 1.5.5.391, XRT 2.21.0 |
 | **Python** | ✅ 3.10–3.13 (CPU), 3.13 (NPU) | The CPU path installs and runs on 3.10, 3.11, 3.12 and 3.13. The NPU path needs the Python the XRT SDK's `pyxrt` was built for, 3.13 with XRT 2.21.0; on 3.12 it stops at `DLL load failed while importing pyxrt` |
-| **YOLOv8n detection on the NPU** | ✅ Verified | 640×640 input, AMD Quark XINT8, compiled to `build/yolov8n_full.ignite` by ignite-xdna |
-| **Other models on the NPU** | ⚠️ From source only | YOLOv8s detection, SESR M7 super-resolution and YOLOv8n-pose pose estimation run on the NPU through `live_ignition.py` with ignite-xdna built from its `main`, and so does YOLO11n detection with its attention matrix multiplies and softmax on ONNX Runtime's CPU provider; none is in a release of either project ([how](#5-run-other-models)) |
+| **YOLOv8n detection on the NPU** | ✅ Verified | 640×640 input, AMD Quark XINT8, compiled to `build/yolov8n_full.ignite` by ignite-xdna with `--silu-sigmoid` |
+| **Other models on the NPU** | ✅ Verified | YOLOv8s detection, SESR M7 super-resolution and YOLOv8n-pose pose estimation run on the NPU through `live_ignition.py`, and so does YOLO11n detection with its attention matrix multiplies and softmax on ONNX Runtime's CPU provider, from a checkout or from the v0.3.3 wheels ([how](#5-run-other-models)) |
 | **Other ONNX models** | ✅ CPU only | ONNX Runtime's CPU execution provider; `live_ignition.py` detects, classifies, estimates poses or upscales according to the model's outputs |
 | **Webcams** | ✅ Verified | USB webcams through DirectShow, then Media Foundation; tested at 640×480 |
 | **Video files and images** | ✅ Verified | Anything OpenCV opens, letterboxed to 640×640; tested with 640×480 and 810×1080 frames |
@@ -27,16 +27,16 @@ worth its hours, and how to validate the result before quoting a number.
 
 ## Other ways to install
 
-**From a release.** Download the wheels from the [v0.3.2 release](https://github.com/jdominick05/Ignition/releases/tag/v0.3.2) into one folder and run pip in that folder; GitLab's release carries the same files. For the NPU path:
+**From a release.** Download the wheels from the [v0.3.3 release](https://github.com/jdominick05/Ignition/releases/tag/v0.3.3) into one folder and run pip in that folder; GitLab's release carries the same files. For the NPU path:
 
 ```bash
-pip install ./ignite_xdna-0.3.0-py3-none-any.whl "./ignition_ai-0.3.2-py3-none-any.whl[npu]"
+pip install ./ignite_xdna-0.3.1-py3-none-any.whl "./ignition_ai-0.3.3-py3-none-any.whl[npu]"
 ```
 
 For `.onnx` models on the CPU only:
 
 ```bash
-pip install ./ignition_ai-0.3.2-py3-none-any.whl
+pip install ./ignition_ai-0.3.3-py3-none-any.whl
 ```
 
 The wheels carry the Python API, the `ignition` command and the app (`python -m ignition.live`, which a checkout's `live_ignition.py` launches). The container is still built in an ignite-xdna checkout.
@@ -99,8 +99,8 @@ python live_ignition.py --power-mode efficiency --fresh   # webcam: may also low
 | `--frames N` | Stop after N timed frames and print the summary (default 0: run until stopped). |
 | `--warmup N` | Untimed frames before the timed ones (default 10). |
 | `--fresh` | Wait for a new camera frame before each inference instead of reusing the newest one. |
-| `--power-mode` | For `.ignite` containers, how the host's threads trade CPU power for speed, sized to your processor: `performance` keeps worker threads spinning on every logical processor (the most frames per second), `balanced` (the default) lets them sleep between frames with one per physical core, `efficiency` sleeps them with a quarter of the physical cores (the least energy). The app prints the mode it applied. `IGNITE_XDNA_POWER_MODE` sets the same thing ([measurements](PERFORMANCE.md#energy-per-frame-against-amds-stack)). A container's CPU step (YOLO11n's attention core) follows the mode only with ignite-xdna `fbd53f5` or later, which is in no release yet. `efficiency` can also lower the NPU's own power mode; see `--npu-power`. |
-| `--npu-power` | `auto` (the default) or `off`, for `.ignite` containers with ignite-xdna's NPU power-mode governor (in no release yet). With `--power-mode efficiency` and paced frames (`--max-fps`, or a webcam with `--fresh`), the app switches the NPU's device-wide power mode to `powersaver` at the end of warm-up. It does so only if the frame's CPU time plus 2.19 times its NPU dispatch fits 80 % of the frame period, the NPU reads `default`, and no other process uses the NPU. It puts `default` back when frames get too slow, when another process opens the NPU (checked every 5 s), and on exit. The summary says what it did and why. A killed run leaves the NPU slowed until the next run starts or `ignition devices --restore-npu-power` runs. `IGNITE_XDNA_NPU_POWER` sets the same thing. |
+| `--power-mode` | For `.ignite` containers, how the host's threads trade CPU power for speed, sized to your processor: `performance` keeps worker threads spinning on every logical processor (the most frames per second), `balanced` (the default) lets them sleep between frames with one per physical core, `efficiency` sleeps them with a quarter of the physical cores (the least energy). The app prints the mode it applied. `IGNITE_XDNA_POWER_MODE` sets the same thing ([measurements](PERFORMANCE.md#energy-per-frame-against-amds-stack)). A container's CPU step (YOLO11n's attention core) follows the mode only with ignite-xdna 0.3.1 or later. `efficiency` can also lower the NPU's own power mode; see `--npu-power`. |
+| `--npu-power` | `auto` (the default) or `off`, for `.ignite` containers with ignite-xdna's NPU power-mode governor (ignite-xdna 0.3.1 or later). With `--power-mode efficiency` and paced frames (`--max-fps`, or a webcam with `--fresh`), the app switches the NPU's device-wide power mode to `powersaver` at the end of warm-up. It does so only if the frame's CPU time plus 2.19 times its NPU dispatch fits 80 % of the frame period, the NPU reads `default`, and no other process uses the NPU. It puts `default` back when frames get too slow, when another process opens the NPU (checked every 5 s), and on exit. The summary says what it did and why. A killed run leaves the NPU slowed until the next run starts or `ignition devices --restore-npu-power` runs. `IGNITE_XDNA_NPU_POWER` sets the same thing. |
 | `--max-fps` | Process at most this many frames per second, waiting between frames the way a camera does; the wait is not part of glass-to-glass time (default 0: as fast as possible). |
 | `--conf`, `--iou` | Detection confidence and NMS IoU thresholds (defaults 0.25 and 0.45). |
 | `--open-timeout` | Seconds allowed for each camera backend to open (default 8). |
@@ -141,14 +141,16 @@ On the test machine, the 100-frame benchmark sustained 128.78 frames per second 
 - **Super-resolution:** one image output a whole multiple of the input size, such as SESR M7 (256×256 to 512×512), shown as the upscaled image.
 - **Pose estimation:** a head-cut YOLOv8-pose model (nine outputs, three with 51 keypoint channels), drawn as each person's box and 17-keypoint skeleton.
 
-YOLOv8s, SESR M7, YOLO11n and YOLOv8n-pose run on the NPU with ignite-xdna built from its `main`. No ignite-xdna release has its super-resolution or pose pipeline yet; without them a SESR or pose model stops at load with an `ImportError` that says so, and a pose `.onnx` model on the CPU needs the pose pipeline too, for its decode. Build the containers in the ignite-xdna checkout with the toolchain YOLOv8n needs (ignite-xdna's [model zoo notes](https://github.com/jdominick05/ignite-xdna/blob/main/docs/MODEL_ZOO_BENCHMARKS.md) record how these were built and checked):
+YOLOv8s, SESR M7, YOLO11n and YOLOv8n-pose run on the NPU with ignite-xdna 0.3.1, which the `npu` extra requires, or its `main`. An older ignite-xdna without the super-resolution or pose pipeline stops a SESR or pose model at load with an `ImportError` that says so, and a pose `.onnx` model on the CPU needs the pose pipeline too, for its decode. Build the containers in the ignite-xdna checkout with the toolchain YOLOv8n needs (ignite-xdna's [model zoo notes](https://github.com/jdominick05/ignite-xdna/blob/main/docs/MODEL_ZOO_BENCHMARKS.md) record how these were built and checked):
 
 ```bash
-ignite-compile --engine graph --input models/yolov8s_cut_xint8.onnx --output build/yolov8s.ignite
+ignite-compile --engine graph --input models/yolov8s_cut_xint8.onnx --output build/yolov8s.ignite --silu-sigmoid
 ignite-compile --engine graph --input models/sesr_m7_xint8.onnx --output build/sesr_m7.ignite
 ignite-compile --engine graph --input models/yolo11n_cut_xint8.onnx --output build/yolo11n.ignite --host-region "/model.10/m/m.0/attn/qkv/conv/Conv=/model.10/m/m.0/attn/Reshape_1"
-ignite-compile --engine graph --input models/yolov8n-pose_cut_xint8.onnx --output build/yolov8n_pose.ignite
+ignite-compile --engine graph --input models/yolov8n-pose_cut_xint8.onnx --output build/yolov8n_pose.ignite --silu-sigmoid
 ```
+
+`--silu-sigmoid` computes every SiLU activation with a four-line integer sigmoid on the NPU instead of the HardSigmoid form AMD's XINT8 model uses, and needs ignite-xdna 0.3.1. On all 5,000 COCO val2017 images, every run through the same letterbox, it lifts YOLOv8n from 27.10 to 34.12 mAP@50-95, YOLOv8s from 37.21 to 42.37 and YOLOv8n-pose from 32.71 to 44.16 OKS mAP@50-95, against 26.68, 37.31 and 32.64 for AMD's stack (ignite-xdna's `results/aie/silu_sigmoid_vs_amd/accuracy/summary.log`). It costs 0.24–0.39 ms per frame, and on YOLOv8s, where AMD's stack is already faster, that widens the gap to 1.43 ms; leave the flag out to keep the speed ([measurements](PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)). SESR M7 has no SiLU, and ignite-xdna refuses the flag for a container with a CPU step, such as YOLO11n.
 
 `yolov8n-pose_cut_xint8.onnx` comes from ignite-xdna's `pipelines/yolov8n-pose/` export and quantization scripts; neither project ships it.
 
@@ -176,11 +178,11 @@ ignition suite ../ignite-xdna/build/yolov8n_full.ignite ../ignite-xdna/models/yo
 
 ## Limitations
 
-- **One NPU model in a release.** YOLOv8n is the only model the released packages run on the NPU. YOLOv8s, SESR M7 and YOLO11n need ignite-xdna built from its `main`, ResNet50 classification has no `.ignite` lowering, and other ONNX models run on the CPU.
+- **YOLO-shaped models only on the NPU.** The released packages run YOLOv8n, YOLOv8s, SESR M7, YOLOv8n-pose and YOLO11n on the NPU. ResNet50 classification has no `.ignite` lowering, and other ONNX models run on the CPU.
 - **A build step.** The `.ignite` container is built from AMD Quark's quantized model with ignite-xdna and the mlir-aie toolchain; it is not a pip install.
-- **AMD's stack is faster on some models.** In the default power mode, on YOLOv8s (16.56–16.74 against 17.99–18.05 ms) and SESR M7 (4.33–4.37 against 6.82–6.84 ms) its NPU stage outruns the engine, which moves activations and weights to the NPU every frame ([measurements](PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)). On YOLOv8s this is a known limitation: no runtime change tried in ignite-xdna closes it.
+- **AMD's stack is faster on some models.** In the default power mode, on YOLOv8s (16.75–16.79 against 18.18–18.21 ms with `--silu-sigmoid`, 17.80–17.87 ms without) and SESR M7 (4.35 against 4.78 ms) its NPU stage outruns the engine, which moves activations and weights to the NPU every frame ([measurements](PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)). On YOLOv8s this is a known limitation: no runtime change tried in ignite-xdna closes it.
 - **Narrow hardware support.** Only Phoenix has been verified. Hawk Point is untested, and Strix-class NPUs and Linux are not supported.
-- **YOLO11n's attention core runs on the CPU.** Its matrix multiplies and softmax took 0.71–0.73 ms of a 10.6–10.7 ms frame in the default power mode, with ignite-xdna `fbd53f5` or later from source; ignite-xdna 0.3.0 keeps that step's threads spinning in every mode. No accuracy has been measured for the container, and its borderline boxes change with one-code differences in preprocessing: on `bus.jpg` it finds 6 objects where AMD's stack finds 7.
+- **YOLO11n's attention core runs on the CPU.** Its matrix multiplies and softmax took 0.74–0.75 ms of a 10.5 ms frame in the default power mode with ignite-xdna 0.3.1; ignite-xdna 0.3.0 keeps that step's threads spinning in every mode. No accuracy has been measured for the container, and its borderline boxes change with one-code differences in preprocessing: on `bus.jpg` it finds 6 objects where AMD's stack finds 7.
 - **Dim light halves the webcam's frame rate.** The test webcam's auto exposure drops to 15 fps in a dim room; `--exposure-priority off` holds 30 fps with a darker image and fewer detections.
 Open work is tracked in [TODO.md](../TODO.md).
 

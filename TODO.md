@@ -1,6 +1,6 @@
 # Ignition TODO
 
-State of `main` on 2026-09-16 (version 0.3.2). Measured figures name the commit whose message records the run;
+State of `main` on 2026-09-17 (version 0.3.3). Measured figures name the commit whose message records the run;
 Ignition does not track benchmark logs (`results/` is gitignored). How the pipeline works is in the
 [performance notes](docs/PERFORMANCE.md#how-a-frame-runs).
 
@@ -109,13 +109,23 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   `results/aie/energy_power_modes_models_phoenix_20260916T2012Z.log`). Switching the NPU to `powersaver` saved 14 %
   per frame at 30 fps for twice the latency, and nothing flat out (ignite-xdna
   `results/aie/energy_npu_pmode_yolov8n_phoenix_20260916T1931Z.log`).
+- [x] **The sigmoid SiLU in the documented containers, and every AMD comparison re-measured on it** (recorded in the
+  commit that adds this entry). The README and usage notes compile YOLOv8n, YOLOv8s and YOLOv8n-pose with
+  `--silu-sigmoid`, and the `npu` extra requires ignite-xdna 0.3.1, which has it, the in-place head readback and SESR
+  M7's native resize and image output. In one sitting on `bus.jpg`, with a control compiled without the flag beside each
+  container: YOLOv8n 8.50 / 8.53 ms against AMD's 10.66 / 10.42 (control 8.26 / 8.29), YOLOv8n-pose 9.28 / 9.35 against
+  12.07 / 11.97 (control 8.99 / 9.00), YOLOv8s 18.21 / 18.18 against 16.79 / 16.75 (control 17.87 / 17.80), SESR M7
+  4.78 / 4.78 against 4.35 / 4.35, YOLO11n 10.46 / 10.50 against 36.77 / 38.30 (ignite-xdna `results/aie/release_033/latency_release033_phoenix_20260917T1538Z.log`). On all
+  5,000 COCO val2017 images the three flagged containers score 34.12 / 42.37 / 44.16 against AMD's 26.68 / 37.31 /
+  32.64. An energy sitting on the new containers was discarded (below, §6).
 
 ## Active
 
 ### 1. Model zoo in Ignition
 
-ignite-xdna's `main` compiles YOLOv8s and SESR M7 to `.ignite` and runs them on Device 0 (merge `6bd2718`), and
-Ignition's `live_ignition.py` serves them (`--task`, `--json`); neither project has released it.
+ignite-xdna compiles YOLOv8s and SESR M7 to `.ignite` and runs them on Device 0 (merge `6bd2718`), and Ignition's
+`live_ignition.py` serves them (`--task`, `--json`). The table below is the pre-merge record; current figures are in the
+[performance notes](docs/PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack).
 
 ignite-xdna's `tools/model_zoo_bench.py` drives Ignition for the suites. Measured 2026-09-14 on Ignition's
 `model-zoo` branch before the merge, logs in ignite-xdna `results/model_zoo/`, G2G means:
@@ -130,22 +140,26 @@ ignite-xdna's `tools/model_zoo_bench.py` drives Ignition for the suites. Measure
 On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.64 ms, in a separate sitting
 (ignite-xdna `results/aie/model_zoo_main_phoenix_20260914T2209Z.log`).
 
-- [x] The `npu` extra requires ignite-xdna 0.3.0 (ignite-xdna `554ab57`), the first ignite-xdna release with
+- [x] The `npu` extra requires ignite-xdna 0.3.1 (ignite-xdna `f98cab2`), the first release with `--silu-sigmoid`, the
+  NPU power governor and power-mode ONNX Runtime threads for CPU steps. 0.3.0 (`554ab57`) was the first with
   `pipelines/sr_pipeline.py`, `pipelines/pose_pipeline.py` and host segments, which Ignition's super-resolution, pose
   and YOLO11n paths import.
-- [ ] YOLO11n's attention core, two matrix multiplies and a softmax, runs on the CPU (0.71–0.73 ms per frame in the
-  default power mode, 0.55–0.57 ms in `performance`, since ignite-xdna `fbd53f5`);
+- [ ] YOLO11n's attention core, two matrix multiplies and a softmax, runs on the CPU (0.74–0.75 ms per frame in the
+  default power mode, 0.53 ms in `performance`, with ignite-xdna 0.3.1);
   the engine has no softmax or activation-by-activation multiply, so running it on the NPU is ignite-xdna work.
   The block cannot be dropped: the C2PSA-ablated `yolo11n_no_c2psa` finds nothing on `bus.jpg`
   (highest class score 0.02 in FP32 and 0.06 in XINT8), and ignite-xdna measured mAP@50-95 0.19 for it on AMD's
   Vitis AI EP against 38.72 for stock FP32 on the CPU (ignite-xdna `docs/BENCHMARKS.md`, its YOLOv11n section).
 - [ ] Measure YOLO11n's COCO accuracy through the container. On `bus.jpg` it finds 6 objects where ONNX Runtime
   on Ignition's numpy letterbox finds 7, because the two inputs differ by one code in 15% of pixel values.
-- [ ] YOLOv8n-pose decodes its keypoints in numpy: decode and NMS take 0.31–0.32 ms per frame against 0.04 ms for
+- [ ] YOLOv8n-pose decodes its keypoints in numpy: decode and NMS take 0.36 ms per frame against 0.13–0.14 ms for
   YOLOv8n's native decode. A container from the AdaRound pose model (34.32 OKS mAP@50-95 on AMD's stack) is not
   built or checked.
 - [ ] ResNet50 has no `.ignite` lowering yet.
-- [ ] SESR M7 dispatch is 4.25 ms against a 1.5 ms target, with a 2.53 ms non-compute floor (§4).
+- [ ] SESR M7 dispatch is 4.18–4.19 ms against a 1.5 ms target, with a 2.53 ms non-compute floor (§4). Its host
+  stages are native since ignite-xdna 0.3.1 (0.57 ms against 2.84 ms for AMD's arm), so the 0.42–0.43 ms it trails AMD's
+  stack by is all NPU stage. Its native resize is within one code of OpenCV's but changes the output image (41.42–42.19 dB
+  PSNR against the OpenCV path); no SESR quality has been measured through it.
 
 ### 2. Release and distribution
 
@@ -181,19 +195,19 @@ Only Phoenix on Windows 11 is verified ([usage notes](docs/USAGE.md#compatibilit
 
 ### 4. NPU dispatch time (ignite-xdna)
 
-AMD's NPU stage is about 1.3 ms faster than Ignition's in the default power mode, 1.0 ms in `performance`, on the
-same model and image in the [performance notes](docs/PERFORMANCE.md#ignition-vs-amds-ryzen-ai-stack)' same-sitting
+AMD's NPU stage is about 1.1 ms faster than Ignition's in the default power mode, 0.9 ms in `performance`, about
+0.26 ms of it the `--silu-sigmoid` option, on the same model and image in the [performance notes](docs/PERFORMANCE.md#ignition-vs-amds-ryzen-ai-stack)' same-sitting
 comparison (0.7 ms with spinning threads in `ffdefad`). Ignition's NPU figure includes the head readback, which the
-default mode slows by 0.3 ms. Most of Ignition's dispatch is activations moving between host memory and the NPU:
+default mode slows by 0.14 ms. Most of Ignition's dispatch is activations moving between host memory and the NPU:
 5.37 ms of a 7.39 ms dispatch with every weight operation switched off (ignite-xdna
 `results/model_zoo/dispatch_floor_yolov8n_full.json`).
 
-The gap is wider on other models. In one sitting in the default mode AMD's `session.run` took 12.67–12.79 ms on
-YOLOv8s against Ignition's 16.76–16.79 ms dispatch, and 1.49–1.50 ms on SESR M7 against 4.18 ms, so AMD's stack is
-faster end to end on both: 16.56–16.74 against 17.99–18.05 ms, and 4.33–4.37 against 6.82–6.84 ms
-([performance notes](docs/PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)). With spinning threads on
-2026-09-15 the YOLOv8s gap was 0.30 ms; in the default mode it is 1.36 ms with the dispatch unchanged, and how much of
-that is the mode rather than the installation was not separated.
+The gap is wider on other models. In one sitting in the default mode AMD's `session.run` took 12.84–12.89 ms on
+YOLOv8s against Ignition's 17.11–17.12 ms dispatch with `--silu-sigmoid` (16.70–16.79 ms without), and 1.51 ms on SESR
+M7 against 4.18–4.19 ms, so AMD's stack is faster end to end on both: 16.75–16.79 against 18.18–18.21 ms (17.80–17.87
+without the flag), and 4.35 against 4.78 ms ([performance notes](docs/PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)).
+With spinning threads on 2026-09-15 the YOLOv8s gap was 0.30 ms; in the default mode without the flag it was 1.36 ms on
+2026-09-16 and 1.04–1.08 ms on 2026-09-17, and how much of that is the mode rather than the installation was not separated.
 
 - [x] **Keep data on the NPU between layers: tried in ignite-xdna, and closed as a known limitation on YOLOv8s
   (2026-09-16).** The target was Ignition's NPU stage no slower than AMD's in a same-sitting run. Holding activations
@@ -239,7 +253,7 @@ the models have been measured, on the 8-core, 16-thread Ryzen 7 8700G only ([per
 - [x] Decide whether any power mode should switch the NPU's device-wide mode. The maintainer's decision
   (2026-09-16): yes. Nothing switches it yet.
 - [x] Design and build that switch (recorded in the commit that adds this entry; ignite-xdna's
-  `pipelines/npu_power.py`, in no release yet). With `--power-mode efficiency` and paced frames, `--npu-power auto`
+  `pipelines/npu_power.py`, first released in ignite-xdna 0.3.1). With `--power-mode efficiency` and paced frames, `--npu-power auto`
   (the default) lowers the device to `powersaver` at the end of warm-up if the predicted frame fits 80 % of its period,
   the device reads `default` and no other process uses the NPU. It restores `default` on slow frames, on another
   process's context and on exit, and a lease file covers a killed run. At 30 fps it saved 20 % and 28 % energy per frame in two sittings on
@@ -248,9 +262,12 @@ the models have been measured, on the 8-core, 16-thread Ryzen 7 8700G only ([per
   only `--max-fps` has been measured.
 - [ ] Price the NPU's `balanced` device mode as an intermediate step for models that do not fit `powersaver` (YOLOv8s at
   30 fps), which the switch does not use.
-- [ ] ignite-xdna `fbd53f5` is on its `main` but in no release. It puts a container's CPU step (YOLO11n's attention
-  core) under the power mode; ignite-xdna 0.3.0, which the `npu` extra requires, still spins those threads in every
-  mode. The maintainer chose not to release for it (2026-09-16), so it ships with the next release.
+- [x] ignite-xdna `fbd53f5` puts a container's CPU step (YOLO11n's attention core) under the power mode. It ships in
+  ignite-xdna 0.3.1, which the `npu` extra requires since v0.3.3; 0.3.0 still spins those threads in every mode.
+- [ ] Measure energy per frame on the `--silu-sigmoid` containers on a clean host. Every energy figure in the
+  performance notes predates them. The v0.3.3 attempt at 30 fps was discarded: a desktop application held one core,
+  idle baselines sat at 36.7–40.6 W against about 35 W clean, and AMD's YOLOv8n arm read 222.42 and 315.98 mJ in its
+  two runs (ignite-xdna `results/aie/release_033/`).
 - [ ] Find out why SESR M7's frame does not spin in `performance` (9.7–10.0 % CPU, like the sleeping modes).
 - [x] `--power-mode` needs an ignite-xdna with `pipelines/power.py`: the `npu` extra now requires ignite-xdna 0.3.0,
   which has it. An older ignite-xdna ignores the mode and prints no power line.
@@ -361,12 +378,12 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
     dispatch.
   - **Energy at 30 fps:** YOLOv8n does not separate from AMD's stack. YOLOv8n-pose spends less than AMD's stack and
     YOLOv8s more, with or without the flag.
-  - **It stays opt-in.** YOLO11n and YOLO-World v2 cannot use it (their CPU segments), and SESR M7 has no SiLU.
+  - **It stays a compiler flag.** YOLO11n and YOLO-World v2 cannot use it (their CPU segments), and SESR M7 has no SiLU.
 
-  Still to decide: whether Ignition's documented YOLOv8n and pose containers are compiled with the flag. That would
-  move the README's latency figures by about 0.3 ms, still ahead of AMD's stack, for 7.4 and 11.5 more points. It
-  would also be a release candidate under the "release on a measured win against AMD" rule. Evidence: ignite-xdna
-  `results/aie/silu_sigmoid_vs_amd/`.
+  Decided by the maintainer (2026-09-17): Ignition's documented YOLOv8n, YOLOv8s and YOLOv8n-pose containers are
+  compiled with the flag, released in v0.3.3. Re-measured in the release sitting against same-commit controls, the flag
+  costs 0.24 / 0.25 ms on YOLOv8n, 0.34 / 0.39 ms on YOLOv8s and 0.30 / 0.35 ms on YOLOv8n-pose (ignite-xdna `results/aie/release_033/latency_release033_phoenix_20260917T1538Z.log`).
+  Evidence for the accuracy: ignite-xdna `results/aie/silu_sigmoid_vs_amd/`.
 - [ ] Maps smaller than the 20 px tile: classifiers, and 28 of ResNet50's 53 convolutions.
 - [ ] An INT16-activation kernel, for models that collapse at 8 bits.
 - [ ] Dilated and transposed convolutions, for segmentation and depth decoders.

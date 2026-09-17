@@ -122,7 +122,11 @@ them.
   (built for a split convolution; no model uses it yet, and it stays in the program for one that does).
 - Concat and slice, ReLU as an integer epilogue, and the HardSigmoid-and-multiply form the quantizer emits in
   place of SiLU. That form is not free: on YOLO-World v2 the swap alone costs 11 points of mAP in FP32 (41.5 to 30.5 %
-  on the first 500 COCO images).
+  on the first 500 COCO images). `ignite-compile --silu-sigmoid` (ignite-xdna 0.3.1) replaces it on the NPU with a
+  four-line integer sigmoid, exact against an integer reference model: on all 5,000 COCO val2017 images YOLOv8n goes
+  from 27.10 to 34.12 mAP@50-95, YOLOv8s from 37.21 to 42.37 and YOLOv8n-pose from 32.71 to 44.16 OKS, for 2–4 % more
+  NPU dispatch. It needs no requantization, and the compiler refuses it for a model with CPU steps
+  ([measurements](PERFORMANCE.md#ignition-vs-amds-ryzen-ai-stack)).
 - Convolution biases in int8, as XINT8 writes them, or in int32 at the input scale times the weight scale, which the
   engine's 32-bit accumulator takes unchanged. Needs ignite-xdna `80ca69e` or later, in no release yet: older versions
   truncate an int32 bias to int8 without an error.
