@@ -157,7 +157,7 @@ def classification_preprocess(img_bgr: np.ndarray, cfg: Dict[str, Any]) -> np.nd
 
 
 class ClassificationPipeline:
-    """ImageNet-style classifier on ONNX Runtime: timm eval preprocessing, softmax, top-k."""
+    """ImageNet-style classifier on ONNX Runtime or native .ignite container."""
 
     task = TASK_CLASSIFY
 
@@ -166,18 +166,45 @@ class ClassificationPipeline:
         self.model_path = Path(model_path)
         self.device_id = device_id
         self.is_native = is_ignite_container(self.model_path)
+        self.topk = int(topk)
         if self.is_native:
-            raise NotImplementedError(f"{self.model_path}: ignite-compile produces no classification containers; "
-                                      f"run the .onnx model")
+            from ignite_xdna.pipelines.classification_pipeline import ClassificationPipeline as NativeClassificationPipeline
+            self._native = NativeClassificationPipeline(self.model_path, device_index=self.device_id)
+            self.backend_name = "xdna1"
+            self.session = None
+            self.config = load_preprocess_config(self.model_path, self._native.input_hw, preprocess_config)
+            return
         note_onnx_runs_on_cpu(self.model_path, backend.lower())
         self.backend_name = "cpu"
-        self.topk = int(topk)
         self.session = _ort_session(self.model_path)
         inp = self.session.get_inputs()[0]
         self.input_name = inp.name
         self.config = load_preprocess_config(self.model_path, tuple(inp.shape[2:]), preprocess_config)
 
     def predict(self, image: Union[str, Path, np.ndarray]) -> ClassificationResult:
+        if self.is_native:
+            if self._native is None:
+                raise RuntimeError("ClassificationPipeline is closed")
+            img_bgr = load_bgr(image, copy=False) if isinstance(image, (str, Path)) or (isinstance(image, np.ndarray) and image.ndim == 3 and image.shape[2] == 3) else None
+            t0 = time.perf_counter()
+            if img_bgr is not None:
+                x = classification_preprocess(img_bgr, self.config)
+            else:
+                x = image
+            probs, timings = self._native.predict_sync(x)
+            k = min(self.topk, probs.size)
+            idx = np.argpartition(-probs, k - 1)[:k]
+            idx = idx[np.argsort(-probs[idx])]
+            topk = [Classification(int(i), float(probs[i])) for i in idx]
+            shape = (img_bgr.shape[0], img_bgr.shape[1]) if img_bgr is not None else (20, 20)
+            return ClassificationResult(topk, {
+                "preprocess_ms": timings.preprocess_ms,
+                "backbone_ms": timings.npu_forward_ms,
+                "postprocess_ms": timings.postprocess_ms,
+                "g2g_ms": timings.glass_to_glass_ms,
+                "total_ms": timings.glass_to_glass_ms,
+            }, shape)
+
         if self.session is None:
             raise RuntimeError("ClassificationPipeline is closed")
         img_bgr = load_bgr(image, copy=False)
@@ -201,6 +228,9 @@ class ClassificationPipeline:
 
     def close(self) -> None:
         self.session = None
+        if self.is_native and hasattr(self, "_native") and self._native is not None:
+            self._native.close()
+            self._native = None
 
     def __enter__(self):
         return self
