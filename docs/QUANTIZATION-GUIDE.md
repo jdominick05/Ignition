@@ -118,9 +118,14 @@ them.
 - Convolutions: **1x1 stride 1 pad 0**, **3x3 stride 1 or 2 pad 1**, **5x5 stride 1 pad 2**.
 - 2x nearest-neighbour upsample, fused into the consumer's input.
 - Max pool (the 5x5 SPPF pool; pooling forces a halo of 2).
-- Residual add, including the per-operand left shifts that wider models need.
+- Residual add, including the per-operand left shifts that wider models need, and a HardSwish applied after the add
+  (built for a split convolution; no model uses it yet).
 - Concat and slice, ReLU as an integer epilogue, and the HardSigmoid-and-multiply form the quantizer emits in
-  place of SiLU.
+  place of SiLU. That form is not free: on YOLO-World v2 the swap alone costs 11 points of mAP in FP32 (41.5 to 30.5 %
+  on the first 500 COCO images).
+- Convolution biases in int8, as XINT8 writes them, or in int32 at the input scale times the weight scale, which the
+  engine's 32-bit accumulator takes unchanged. Needs ignite-xdna `80ca69e` or later, in no release yet: older versions
+  truncate an int32 bias to int8 without an error.
 
 **Does not compile**
 
@@ -143,6 +148,15 @@ ONNX Runtime call. Keep the region as small as the unsupported ops allow: with Y
 convolutions included, the same step took 1.95-1.98 ms. The CPU step follows the power mode only with ignite-xdna
 `fbd53f5` or later, which is in no release yet. Use it for a tail or a single exotic block, never for something in the
 middle of a hot loop.
+
+Several regions cost more, and are sometimes still the only route. YOLO-World v2 runs its four text attention blocks as
+host segments in the middle of the neck, each with its projection convolution: 9.650 ms of a 48.227 ms profiled frame
+(ignite-xdna `results/aie/yolow_gptq/`).
+- **Region rules:** regions may share constants (its text guide), and a region's input may be a Concat view over
+  several tensors.
+- **Constants at run time:** a region's constants can be replaced at run time, which is how one YOLO-World container
+  takes any class names (`EngineSession.set_host_constants`).
+- **Version:** these rules need ignite-xdna `206cfec` or later, in no release yet.
 
 ---
 
@@ -184,6 +198,18 @@ Measure that before reaching for anything cleverer.
 326 nodes on the NPU at 2.45 ms — and scored **0.50 % top-1**, because a clamp (131 to -108) distorted the scale
 grid by 3.25 x 10^32. The design-time defence is keeping per-channel weight and batch-norm ranges comparable, and
 running cross-layer equalization before quantizing.
+
+**...and for a convolution whose output is a small difference of large terms.** Any rounding error is large against
+such an output. In YOLO-World v2's four C2fAttn output convolutions, the part reading the ordinary branches and the
+part reading the attention have RMS 22.4 and 22.3 while their sum has 1.34.
+- **The collapse:** plain XINT8 scores 2.1 % mAP (first 500 images). The CPU collapses too, so it is the quantized
+  model, not the runtime.
+- **What does not help:** splitting each convolution so each part gets its own weight scale buys nothing, and neither
+  does keeping the halves' outputs in float.
+- **What does:** nearest rounding and XINT8's int8 bias each swamp the output. GPTQ rounding at the same power-of-two
+  scale, with an int32 bias, recovers 24.7 % on the first 300 images, against 24.5 % with those convolutions in FP32
+  (ignite-xdna `pipelines/yolow/3c_gptq_cv2.py`, `results/aie/yolow_gptq/`). Measure each suspect layer's output
+  against FP32 before blaming the attention or the precision.
 
 **4. Reach for AdaRound only where it has paid.** It recovers rounding error, not a collapsed distribution:
 
@@ -257,7 +283,7 @@ where the task genuinely needs it**.
 | Add a layer at low resolution | Cheap: one more pass over a small map |
 | Add a layer at full resolution | Expensive: fills run about 4x the tensor |
 | Use a 5x5 convolution at stride 1 | One packet per 8 input channels instead of 32: up to 4x a 3x3's fills, 73 % of each plane never read |
-| Move a block to the host | About 0.5 ms per frame and one ONNX Runtime call, and the container stops being pure NPU |
+| Move a block to the host | About 0.5 ms per frame and one ONNX Runtime call for YOLO11n's attention core, 9.650 ms for YOLO-World v2's four attention blocks, and the container stops being pure NPU |
 
 ---
 

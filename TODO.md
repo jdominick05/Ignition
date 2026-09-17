@@ -265,11 +265,14 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
 **The gap to aim at**, from measurements already in ignite-xdna's `docs/BENCHMARKS.md`:
 - **XINT8 collapse.** AMD's quantization collapses some models: MobileViT-XXS at 0.00 % top-1, DenseNet-121 and
   ResNeXt-50 at 0.10 %, YOLO-World v2 at 1.8 % mAP against 37.0 % in FP32. The CPU collapses the same way on the same
-  quantized models, so the answer is precision, not placement.
+  quantized models, so the answer is precision, not placement. (YOLO-World v2's turned out to be rounding, not a lack of
+  bits: four convolutions whose output is a small difference of large terms, recovered at 8 bits with GPTQ rounding and
+  int32 biases in ignite-xdna `80ca69e`.)
 - **INT16 activations.** The silicon runs them at 0.93 times int8's speed, but AMD's toolchain cannot express them
   on XDNA1: at opset 17 its runtime rejects the quantization nodes, and at opset 21 its parser rejects the model.
 - **Placement.** Some models barely reach the NPU: YOLO11n gets 6 of 1,300 nodes and YOLO-World v2 48 of 1,081,
-  which leaves them slower than the CPU alone.
+  which leaves them slower than the CPU alone. ignite-xdna's graph engine runs both with only their attention on the CPU
+  (YOLO-World v2: 63 of its 67 convolutions on the NPU).
 - **Newer releases.** In this project's testing, Ryzen AI 1.8 installed without the Phoenix xclbin and rejected the
   driver's XDNA1 xclbins, so XDNA1 users stay on 1.7.1 ([amd/RyzenAI-SW#400](https://github.com/amd/RyzenAI-SW/issues/400)).
 - **The class that fits.** The engine's tile is 20 px, which is the deepest map of a network at a 640 input
@@ -290,11 +293,25 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
     shortcuts.
   - Channel counts padded to multiples of 32.
   - Classifier tails (global average pool, Gemm) as CPU segments.
-- [ ] Mixed precision through CPU segments: the layers that collapse at 8 bits in FP32 on the CPU, the rest on the
-  NPU. First candidates are YOLO-World v2 (its offline accuracy ablation gates everything else) and MobileViT-XXS.
-  AMD's quantizer can also leave nodes in FP32 on the CPU, so the claim to prove is speed at equal accuracy.
-- [ ] Per-channel weight scales, which AMD's stack rejects. **Unverified:** whether the engine's requantization shift
-  is per-channel data in the weight packet (no kernel change) or fixed in the kernel (a kernel decision).
+- [x] **Mixed precision through CPU segments, YOLO-World v2** (ignite-xdna `9096925`, `80ca69e`). The collapse is four
+  C2fAttn output convolutions, not the attention. With those four as FP32 CPU steps a container scored 24.5 % mAP on the
+  first 300 COCO val2017 images, identical to ONNX Runtime; AMD's stack runs that model at the same accuracy with 110
+  nodes on the NPU and 96.34 ms per image in its eval. Requantized with GPTQ rounding and int32 biases, the four run on
+  the NPU instead: 24.7 %, exact on every layer, and a profiled frame of 48.0-48.2 ms against 53.0-53.5 ms for the
+  FP32-step container in the same sitting. The profile quantizes the input and dequantizes the heads in numpy, and it is
+  not a sitting against AMD's stack (ignite-xdna `results/aie/yolow_gptq/`).
+- [ ] Mixed precision for MobileViT-XXS: not tried. At its 224 px input the maps fall below the 20 px tile.
+- [ ] Per-channel weight scales, which AMD's stack rejects. **Answered (ignite-xdna `engine.cc`):** a weight packet
+  carries one output shift for its 32 output channels and a per-channel int32 bias, so per-channel weight scales are a
+  change to the one engine program. On YOLO-World v2's collapsing convolutions, GPTQ at one scale per tensor was ahead
+  of per-channel scales on two of four layers and within 4 dB on the other two, with no kernel change (ignite-xdna
+  `results/aie/yolow_gptq/cv2_cancellation.log`).
+- [ ] **Open-vocabulary detection in Ignition.** ignite-xdna `6a39780`..`a78a500`: one YOLO-World v2 container takes
+  any class names at run time, because the vocabulary enters only its CPU attention steps and the host decode
+  (`YoloWorldPipeline.set_classes`, 90.1 ms for six names; 70/70 layers exact with another vocabulary). Renaming 23
+  COCO categories to synonyms cost the quantized model 22 % of their mAP against 11 % in FP32. To do: `--task world
+  --classes` in `live_ignition.py` and `ignition suite`, a native contrastive decode (10.9 ms of numpy today), then a
+  sitting against AMD's stack and the CPU.
 
 **Kernel decisions (the one-program rule: the maintainer decides, with measured sizing):**
 - [ ] Maps smaller than the 20 px tile: classifiers, and 28 of ResNet50's 53 convolutions.
@@ -305,7 +322,7 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
 
 **App tasks built from the above:** instance segmentation (YOLOv8n-seg: its mask assembly is one small matrix
 multiply on the CPU, and the rest is convolutions, like pose), depth (FastDepth, MiDaS small), matting (MODNet),
-semantic segmentation (BiSeNetV2) and oriented boxes.
+semantic segmentation (BiSeNetV2), oriented boxes, and open-vocabulary detection (YOLO-World v2, item above).
 
 **Not pursued:** general transformers on XDNA1. Every CPU island in the middle of a block pays the dispatch floor.
 
