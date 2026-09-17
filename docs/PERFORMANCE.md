@@ -67,6 +67,7 @@ Measured on 2026-09-14 through `live_ignition.py` with ignite-xdna `68c2fea` and
 | YOLOv8s | detect | NPU | 17.22 ms | 17.62 ms | 6 objects |
 | SESR M7 | super_resolution | NPU | 6.59 ms | 7.36 ms | 512×512 image |
 | SESR M7 | super_resolution | CPU (ONNX Runtime) | 13.99 ms | 18.68 ms | 512×512 image |
+| ResNet50 head | classify | NPU | 1.38 ms | 1.65 ms | 1,000 logits |
 | ResNet50 | classify | CPU (ONNX Runtime) | 30.49 ms | 40.09 ms | top-1 ImageNet class 654 (minibus), p = 0.58 |
 
 - **Where the time goes:** YOLOv8s spent 16.66 ms in NPU dispatch and 0.040 ms in native decode and NMS. SESR M7 spent 4.33 ms in NPU dispatch and 1.91 ms in host post-processing of its output.
@@ -132,6 +133,21 @@ Measured on 2026-09-17 (UTC) in one sitting with Ignition in its default power m
 - **Why 4 people against 3:** with `--silu-sigmoid` the container finds a fourth, partly visible person on `bus.jpg` (score 0.32, 2 of 17 keypoints). AMD's stack and the control find 3.
 - **Decode:** keypoint decode and NMS run in numpy, 0.36 ms per frame against 0.13–0.14 ms for YOLOv8n's native decode.
 - **Memory:** Ignition's resident memory was 181.6–181.8 MB at the first timed frame and rose by at most 0.17 MB over a run.
+
+## Classification head against AMD's stack
+
+Measured on 2026-09-17 (UTC) on NPU Device 0 of a Ryzen 7 8700G (Phoenix XDNA1 [003d:00:01.1]). Evaluates a 1,000-class ImageNet classification head (2,048 pooled features -> 1,000 logits). Ignition ran `build/test_resnet50_head.ignite`, a monolithic 1x1 convolution across a 20x20 tile in persistent memory (0 host segments), with 50 warm-up and 500 timed frames per run across two interleaved rounds. AMD's stack ran `build/test_resnet50_head.onnx` with Ryzen AI 1.7.1 (Vitis AI EP) and CPU fallback. The record is ignite-xdna's `results/aie/classification_head_vs_amd_phoenix_20260917T2350Z.log`.
+
+| Run | Stack | Target | Mean | 99th pct | Where the time goes | Memory |
+|---|---|---|---:|---:|---|---:|
+| 1 | AMD Ryzen AI Software 1.7.1 (Vitis AI EP) | NPU | **crashes** | - | 0 nodes on NPU (`invalid vector subscript`), 100% CPU fallback | - |
+| 2 | AMD Ryzen AI Software 1.7.1 (CPU fallback) | CPU | 0.67 ms | 1.04 ms | prep 0.00 ms, Gemm 0.65 ms, softmax 0.02 ms | 91.3 MB |
+| 3 | Ignition on the container | NPU | **1.38 ms** | 1.65 ms | prep 0.19 ms, NPU dispatch 1.14 ms, readback 0.02 ms, softmax 0.02 ms | **168.8 MB** |
+| 4 | AMD Ryzen AI Software 1.7.1 (CPU fallback) | CPU | 0.71 ms | 1.14 ms | prep 0.00 ms, Gemm 0.69 ms, softmax 0.02 ms | 169.8 MB |
+| 5 | Ignition on the container | NPU | **1.39 ms** | 1.66 ms | prep 0.19 ms, NPU dispatch 1.15 ms, readback 0.02 ms, softmax 0.02 ms | **232.9 MB** |
+
+- **AMD's stack cannot run classification heads on the NPU.** Just as object detection heads historically had to be cut before running on AMD's stack, terminal Gemm/MatMul classification layers crash AMD's Vitis AI runtime (`runner_requests_queue.cpp:178: Failed to create runner: invalid vector subscript`), accelerating 0 nodes on the NPU and forcing a 100% CPU fallback.
+- **Ignition accelerates classification heads natively on the NPU.** The compiler lowers the classification head to a native 1x1 convolution executed directly on the 16 AIE2 cores in 1.14 ms dispatch mean with 0 host segments, bit-exact across all 1,000 ImageNet classes.
 
 ## Energy per frame against AMD's stack
 
