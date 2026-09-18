@@ -117,6 +117,16 @@ color = "orange"
 
 [[badge]]
 row = 2
+alt = "ResNet50 classification head latency per frame on the NPU through the engine and AMD's stack, both runs; AMD's stack crashes trying to place it on the NPU"
+label = "classification head"
+file = "docs/PERFORMANCE.md"
+section = "Classification head against AMD's stack"
+search = '\| 1 \| AMD[^|]*\| ResNet50 head, NPU \| \**([a-z]+)\**(?s:.*?)\| 3 \| Ignition[^|]*\| ResNet50 head, NPU \| \**([0-9.]+) ms(?s:.*?)\| 5 \| Ignition[^|]*\| ResNet50 head, NPU \| \**([0-9.]+) ms'
+replace = "$2 / $3 ms vs AMD $1"
+color = "brightgreen"
+
+[[badge]]
+row = 2
 alt = "Resident memory through Ignition and AMD's stack, both runs"
 label = "memory (RSS)"
 file = "docs/PERFORMANCE.md"
