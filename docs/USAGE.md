@@ -137,7 +137,7 @@ On the test machine, the 100-frame benchmark sustained 128.78 frames per second 
 `live_ignition.py` works out what a model computes from the container's manifest or the ONNX model's outputs, and `--task` overrides it:
 
 - **Detection:** YOLO models (YOLOv8n, YOLOv8s, YOLO11n), drawn as boxes.
-- **Classification:** one `(1, N)` output, such as ResNet50, shown as the top 5. Preprocessing follows a timm `preprocess_config.json` beside the model, or ImageNet defaults. It runs on the CPU only: the engine lowers a terminal classification head onto the NPU (ignite-xdna `bd87558`, [measurements](PERFORMANCE.md#classification-head-against-amds-stack)), but `live_ignition.py` does not yet accept a `.ignite` classify container.
+- **Classification:** one `(1, N)` output, such as ResNet50, shown as the top 5. Preprocessing follows a timm `preprocess_config.json` beside the model, or ImageNet defaults. It runs on the CPU only. The engine can place a whole classifier on the NPU (ignite-xdna `3f940b4`: 28/28 layers exact on silicon, its pooling carried by one host segment — [measurements](PERFORMANCE.md#classification-head-against-amds-stack)), but that holds for one model family at 640, not for the zoo, and `live_ignition.py` does not yet accept a `.ignite` classify container.
 - **Super-resolution:** one image output a whole multiple of the input size, such as SESR M7 (256×256 to 512×512), shown as the upscaled image.
 - **Pose estimation:** a head-cut YOLOv8-pose model (nine outputs, three with 51 keypoint channels), drawn as each person's box and 17-keypoint skeleton.
 
@@ -178,7 +178,7 @@ ignition suite ../ignite-xdna/build/yolov8n_full.ignite ../ignite-xdna/models/yo
 
 ## Limitations
 
-- **YOLO-shaped models only on the NPU.** The released packages run YOLOv8n, YOLOv8s, SESR M7, YOLOv8n-pose and YOLO11n on the NPU. ResNet50 classification runs on the CPU in this app: the engine has a `.ignite` lowering for a terminal classification head ([measurements](PERFORMANCE.md#classification-head-against-amds-stack)), not yet wired into `live_ignition.py`, and other ONNX models run on the CPU.
+- **YOLO-shaped models only on the NPU.** The released packages run YOLOv8n, YOLOv8s, SESR M7, YOLOv8n-pose and YOLO11n on the NPU. ResNet50 classification runs on the CPU in this app: the engine has a `.ignite` lowering that puts a whole classifier on the device for models it accepts, and one of fifteen XINT8 classifiers reaches a schedule at all ([measurements](PERFORMANCE.md#classification-head-against-amds-stack)); none of it is wired into `live_ignition.py` yet, and other ONNX models run on the CPU.
 - **A build step.** The `.ignite` container is built from AMD Quark's quantized model with ignite-xdna and the mlir-aie toolchain; it is not a pip install.
 - **AMD's stack is faster on some models.** In the default power mode, on YOLOv8s (16.75–16.79 against 18.18–18.21 ms with `--silu-sigmoid`, 17.80–17.87 ms without) and SESR M7 (4.35 against 4.78 ms) its NPU stage outruns the engine, which moves activations and weights to the NPU every frame ([measurements](PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)). On YOLOv8s this is a known limitation: no runtime change tried in ignite-xdna closes it.
 - **Narrow hardware support.** Only Phoenix has been verified. Hawk Point is untested, and Strix-class NPUs and Linux are not supported.
