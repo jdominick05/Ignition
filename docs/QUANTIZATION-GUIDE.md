@@ -134,7 +134,13 @@ them.
 **Does not compile**
 
 - Softmax, and a general activation-by-activation multiply.
-- MatMul, Gemm and GlobalAveragePool — so a classifier tail has no op, and neither does attention.
+- MatMul and Gemm in mid-graph, GlobalAveragePool anywhere but a terminal classification chain, and
+  therefore attention too. One exception, since ignite-xdna `bd87558`: a **terminal** chain —
+  GlobalAveragePool, optionally a quantizer's `Mul`, Flatten/Reshape, then Gemm or MatMul feeding a Q/DQ
+  straight to the graph output (or a bare terminal Gemm) — lowers as one 1x1 convolution on the NPU, with
+  0 host segments and no new core opcode. The 2,048-feature, 1,000-class head measures 1.38 ms per frame
+  on silicon ([measurements](PERFORMANCE.md#classification-head-against-amds-stack)); one head per model,
+  and it must be the graph's output.
 - Dilation other than 1, and 1x1 convolutions at stride 2.
 - Bilinear upsampling. Nearest is free; bilinear leaves the engine.
 
