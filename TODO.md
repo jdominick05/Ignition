@@ -155,12 +155,17 @@ On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.6
 - [ ] YOLOv8n-pose decodes its keypoints in numpy: decode and NMS take 0.36 ms per frame against 0.13–0.14 ms for
   YOLOv8n's native decode. A container from the AdaRound pose model (34.32 OKS mAP@50-95 on AMD's stack) is not
   built or checked.
-- [ ] ResNet50 classification runs on the CPU in this app. The engine has the `.ignite` lowering of a terminal
-  classification head and measured 1.378–1.386 ms on silicon where AMD's stack crashes at placement
-  ([measurements](docs/PERFORMANCE.md#classification-head-against-amds-stack)), but `pipelines/vision.py` still
-  raises `NotImplementedError` for a `.ignite` classify container. Open: wire `--task classify` to ignite-xdna's
-  `ClassificationPipeline`, and re-run the head on a real backbone's features — the 2026-09-17 sitting fed it a
-  constant zero-point vector and priced latency, not accuracy.
+- [ ] ResNet50 classification runs on the CPU in this app. The engine half moved twice since this item was
+  written: ignite-xdna `bd87558` lowered the terminal head (1.378–1.386 ms on silicon where AMD's stack crashes
+  at placement, [measurements](docs/PERFORMANCE.md#classification-head-against-amds-stack)), and `3f940b4` put a
+  **whole classifier** on the device — `yolov8n-cls` at 640, 28/28 layers exact, its pooling carried by one host
+  segment, logits equal to ONNX Runtime on the same frame. `pipelines/vision.py` still raises
+  `NotImplementedError` for a `.ignite` classify container. Open: wire `--task classify` to ignite-xdna's
+  `ClassificationPipeline`. Deliberately not urgent: of fifteen XINT8 classifiers put through the compiler,
+  **one** reaches a schedulable graph — the ResNet family stops at a 3x3 stride-2 stem `MaxPool` the core does not
+  implement — so wiring buys one model at 640 rather than a zoo, and the unlock is engine-side (stem pooling and
+  grouped convolution), not here. The accuracy question is also still open: the 2026-09-17 sitting fed a constant
+  zero-point vector and the 2026-09-18 classifier has no measured ImageNet top-1.
 - [ ] SESR M7 dispatch is 4.18–4.19 ms against a 1.5 ms target, with a 2.53 ms non-compute floor (§4). Its host
   stages are native since ignite-xdna 0.3.1 (0.57 ms against 2.84 ms for AMD's arm), so the 0.42–0.43 ms it trails AMD's
   stack by is all NPU stage. Its native resize is within one code of OpenCV's but changes the output image (41.42–42.19 dB

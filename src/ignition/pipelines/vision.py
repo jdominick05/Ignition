@@ -167,8 +167,10 @@ class ClassificationPipeline:
         self.device_id = device_id
         self.is_native = is_ignite_container(self.model_path)
         if self.is_native:
-            raise NotImplementedError(f"{self.model_path}: ignite-compile produces no classification containers; "
-                                      f"run the .onnx model")
+            raise NotImplementedError(
+                f"{self.model_path}: this app has no native classification path yet. ignite-compile does build "
+                f"classify containers and the engine runs a whole classifier on the NPU (ignite-xdna 3f940b4), "
+                f"but ClassificationPipeline is not wired to one here; run the .onnx model on the CPU for now.")
         note_onnx_runs_on_cpu(self.model_path, backend.lower())
         self.backend_name = "cpu"
         self.topk = int(topk)

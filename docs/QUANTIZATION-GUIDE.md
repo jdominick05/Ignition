@@ -137,10 +137,27 @@ them.
 - MatMul and Gemm in mid-graph, GlobalAveragePool anywhere but a terminal classification chain, and
   therefore attention too. One exception, since ignite-xdna `bd87558`: a **terminal** chain —
   GlobalAveragePool, optionally a quantizer's `Mul`, Flatten/Reshape, then Gemm or MatMul feeding a Q/DQ
-  straight to the graph output (or a bare terminal Gemm) — lowers as one 1x1 convolution on the NPU, with
-  0 host segments and no new core opcode. The 2,048-feature, 1,000-class head measures 1.38 ms per frame
-  on silicon ([measurements](PERFORMANCE.md#classification-head-against-amds-stack)); one head per model,
-  and it must be the graph's output.
+  straight to the graph output (or a bare terminal Gemm) — lowers the Gemm as one 1x1 convolution on the
+  NPU, with no new core opcode. The 2,048-feature, 1,000-class head measures 1.38 ms per frame on silicon
+  ([measurements](PERFORMANCE.md#classification-head-against-amds-stack)); one head per model, and it must
+  be the graph's output.
+- **A global average pool is matched, never computed.** The head's Gemm becomes a convolution; the average
+  does not run on the device at all. Since ignite-xdna `3f940b4` the compiler carves the pooling span into a
+  host region automatically, so a whole classifier compiles and is correct — but it declares **one host
+  segment**, and a container with any host segment is a hybrid, not a network wholly on the NPU. Only a
+  model whose input already holds pooled features reaches 0 host segments. Build expecting the host step.
+- **Every stored map must be at least one 20-pixel tile, which decides your input size.** A /32 backbone at
+  224 ends at 7x7 and fails with `a 14-pixel map is smaller than one 20-pixel tile` (measured on
+  `yolov8n-cls` at 224); at 640 the same graph compiles and verifies 28/28 layers exact on silicon. That is
+  8x the arithmetic of a 224 classifier — a classifier here is priced at 640, not at the resolution its
+  accuracy was reported at.
+- **Classification is where the op set bites hardest.** Of 15 XINT8 classifiers put through the compiler,
+  **one** reached a schedulable graph. ResNet50, wide_resnet50_2, wide_resnet101_2, resnext50_32x4d and
+  densenet121 all stop at a **3x3 stride-2 `MaxPool`** the core does not implement (it takes only the SPPF
+  5x5 pad-2 form) — the stem pool every ResNet-family zoo model begins with, before pooling, grouping or
+  the head is ever reached. `regnetx_002` stops at grouped convolution (group 3, not depthwise). So do not
+  plan a ResNet50 classifier around the head lowering: the head is the part that works. Sweep and refusals
+  verbatim: ignite-xdna `results/aie/model_zoo_classifier_compile_20260918T142628Z.log`.
 - Dilation other than 1, and 1x1 convolutions at stride 2.
 - Bilinear upsampling. Nearest is free; bilinear leaves the engine.
 
