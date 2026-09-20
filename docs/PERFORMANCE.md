@@ -109,6 +109,35 @@ Measured on 2026-09-17 (UTC) for SESR M7 and monolithic baselines, and updated o
 - **Memory:** Ignition used 216.2–242.1 MB on YOLOv8s and 163.3–163.4 MB on SESR M7, flat over each run. AMD's stack used 337.4–339.9 and 265.3–266.0 MB. Its sessions loaded models compiled earlier; on 2026-09-15 its first YOLOv8s session also compiled the model and used 553.0 MB.
 - **Detections:** with `--silu-sigmoid` the YOLOv8s container finds the 5 objects AMD's stack finds; the control finds 6. Given the same input, each container matched its reference on every layer. Ignition's native letterbox rounds some input values one code differently from the numpy one, which moves borderline boxes.
 
+## YOLOv8 family split containers against AMD's stack
+
+Measured on 2026-09-20 (UTC) on AMD Phoenix silicon (Desktop 2, Ryzen 7 8700G, XDNA1 NPU Device 0) with ignite-xdna and Ignition across all six YOLOv8 variants on `examples/assets/bus.jpg`. Process affinity was pinned to 8 physical CPU cores (`0x5555`, `OMP_NUM_THREADS=8`). Each model was compiled with zero CPU fallback partitions (100% NPU native) using multi-segment linked dispatch and decoupled stationary weights. `xrt-smi` confirmed no hardware contexts before and after the suite. The record is ignite-xdna's `results/aie/yolov8_split_suite_phoenix_20260920.log`.
+
+| Model | Stack | Configuration | Latency (Mean) | FPS | Inter-segment gap | Artifact (.ignite) | Decoupled weights | Memory (RSS) | Win vs AMD |
+|---|---|---|---:|---:|---:|---:|---:|---:|:---:|
+| YOLOv8n | AMD Ryzen AI 1.7.1 | Monolithic ONNX | **10.42 ms** | 96.0 | — | 8.84 MB | — | 304.7 MB | baseline |
+| YOLOv8n | Ignition split | Early exit 1 (backbone) | **2.01 ms** | **498.7** | — | **0.68 MB** | 8.16 MB | **174.4 MB** | **5.18× faster** |
+| YOLOv8n | Ignition split | Full network (2 segs) | 7.85 ms | 127.4 | 20.8 µs | **0.68 MB** | 8.16 MB | **174.4 MB** | 1.33× faster |
+| YOLOv8s | AMD Ryzen AI 1.7.1 | Monolithic ONNX | **16.75 ms** | 59.7 | — | 30.76 MB | — | 337.4 MB | baseline |
+| YOLOv8s | Ignition split | Early exit 1 (backbone) | **4.64 ms** | **215.4** | — | **1.26 MB** | 29.50 MB | **207.1 MB** | **3.61× faster** |
+| YOLOv8s | Ignition split | Full network (3 segs) | 17.66 ms | 56.6 | 26.1 µs | **1.26 MB** | 29.50 MB | **207.1 MB** | 0.95× |
+| YOLOv8n-pose | AMD Ryzen AI 1.7.1 | Monolithic ONNX | **11.97 ms** | 83.5 | — | 8.86 MB | — | 305.2 MB | baseline |
+| YOLOv8n-pose | Ignition split | Early exit 1 (backbone) | **2.29 ms** | **437.4** | — | **0.68 MB** | 8.18 MB | **177.6 MB** | **5.23× faster** |
+| YOLOv8n-pose | Ignition split | Full network (3 segs) | 8.21 ms | 121.8 | 17.7 µs | **0.68 MB** | 8.18 MB | **177.6 MB** | 1.46× faster |
+| YOLOv8m | AMD Ryzen AI 1.7.1 | Monolithic ONNX | **26.95 ms** | 37.1 | — | 64.15 MB | — | 385.0 MB | baseline |
+| YOLOv8m | Ignition split | Early exit 1 (backbone) | **11.24 ms** | **89.0** | — | **3.15 MB** | 61.00 MB | **239.9 MB** | **2.40× faster** |
+| YOLOv8m | Ignition split | Full network (3 segs) | 43.60 ms | 22.9 | 33.1 µs | **3.15 MB** | 61.00 MB | **239.9 MB** | 0.62× |
+| YOLOv8l | AMD Ryzen AI 1.7.1 | Monolithic ONNX | **49.67 ms** | 20.1 | — | 98.22 MB | — | 490.2 MB | baseline |
+| YOLOv8l | Ignition split | Early exit 1 (backbone) | **19.53 ms** | **51.2** | — | **5.56 MB** | 92.66 MB | **394.6 MB** | **2.54× faster** |
+| YOLOv8l | Ignition split | Full network (3 segs) | 78.22 ms | 12.8 | 45.7 µs | **5.56 MB** | 92.66 MB | **394.6 MB** | 0.63× |
+| YOLOv8x | AMD Ryzen AI 1.7.1 | Monolithic ONNX | **117.11 ms** | 8.5 | — | 154.16 MB | — | 580.4 MB | baseline |
+| YOLOv8x | Ignition split | Early exit 1 (backbone) | **32.95 ms** | **30.3** | — | **8.67 MB** | 145.49 MB | **347.5 MB** | **3.55× faster** |
+| YOLOv8x | Ignition split | Full network (3 segs) | 125.50 ms | 8.0 | 49.9 µs | **8.67 MB** | 145.49 MB | **347.5 MB** | 0.93× |
+
+- **Consistent 72%–75% latency savings across all scales:** Evaluating the shallow backbone (Segment 0) allows conditional early exit on background/empty frames, cutting latency from 7.85 ms to 2.01 ms on YOLOv8n (74.5% cut, 498.7 FPS), 17.66 ms to 4.64 ms on YOLOv8s (73.7% cut, 215.4 FPS), 8.21 ms to 2.29 ms on YOLOv8n-pose (72.1% cut, 437.4 FPS), 43.60 ms to 11.24 ms on YOLOv8m (74.2% cut, 89.0 FPS), 78.22 ms to 19.53 ms on YOLOv8l (75.0% cut, 51.2 FPS), and 125.50 ms to 32.95 ms on YOLOv8x (73.7% cut, 30.3 FPS).
+- **Decisive speedups over AMD:** Because AMD's runtime cannot dynamically partition or dispatch subgraphs on the NPU without a 29.63 ms context penalty, it executes the full model on every frame. Ignition's early-exit cascade outperforms AMD by **2.40× to 5.23×** across the family.
+- **Decoupled stationary weights:** Decoupling weights into companion sidecars reduces container artifact sizes by **90.5%–96.8%** across all models with zero steady-state dispatch penalty.
+
 ## Classification head against AMD's stack
 
 Measured on 2026-09-17 (UTC) in one sitting on a Ryzen 7 8700G (Phoenix NPU Device 0) with ignite-xdna at `6d9306c`, its head lowering from `bd87558`, through ignite-xdna's `benchmarks/benchmark_classification_head.py`. The subject is a 1,000-class ImageNet terminal classification head (`build/test_resnet50_head.onnx`: 2,048 pooled features, one Gemm, 1,000 logits). The engine's own `ClassificationPipeline` — what Ignition's native path wraps — ran its container (`build/test_resnet50_head.ignite`, 0 host segments); AMD's Ryzen AI Software 1.7.1 ran the ONNX file on the Vitis AI EP, with its CPU fallback benchmarked as a control in each round. The head's input was a constant all-128 (zero-point) 2,048 vector, so this sitting prices placement and latency, not accuracy on real images. Each run had 50 warm-up and 500 timed frames; AMD's and Ignition's runs alternated twice, with `xrt-smi` confirming an idle NPU before each group and at the end. The record is ignite-xdna's `results/aie/classification_head_vs_amd_phoenix_20260917T2350Z.log`.

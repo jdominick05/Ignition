@@ -13,6 +13,11 @@
 #
 # Every number badge compares Ignition with AMD's stack: a number without an AMD counterpart is measured, not shown
 # alone. A badge with `message` is static; one with `image` uses that image URL as it is. `row` groups badges into lines.
+#
+# Only one badge per model type: different scale variants of the same model type (e.g. YOLOv8m and YOLOv8s) do not
+# both need badges in the README, even if both are recorded in docs/PERFORMANCE.md. Different model types/tasks (e.g.
+# YOLOv8 detect vs YOLOv8-pose) count as different models. Continue to record all variants' performance in
+# docs/PERFORMANCE.md, but keep the README badges minimal and uncrowded.
 
 repository = "jdominick05/Ignition"
 branch = "main"

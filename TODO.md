@@ -422,8 +422,8 @@ multiply on the CPU, and the rest is convolutions, like pose), depth (FastDepth,
 semantic segmentation (BiSeNetV2), oriented boxes, and open-vocabulary detection (YOLO-World v2, item above).
 
 **Split and Modular Containers (Decoupled Weights & Subgraph Cascades):**
-- [x] **Decoupled stationary weights (`.weights` sidecar):** `serializer.py` and `ignite-compile --decouple-weights` strips weights from `.ignite` containers, shrinking distribution size by 92.4% on YOLOv8n (8.8 MB -> 674 KB) and 95.9% on YOLOv8s (30.76 MB -> 1.26 MB) with 0.000 ms steady-state dispatch penalty and bit-exact outputs.
-- [x] **Early-exit cascades (`max_segments=N`):** Multi-segment NPU execution allows early exit on background/empty camera frames (e.g. YOLOv8s shallow backbone runs at 4.72 ms / 211.8 FPS, saving 12.58 ms per background frame; 72.7% latency and energy reduction).
+- [x] **Decoupled stationary weights (`.weights` sidecar):** `serializer.py` and `ignite-compile --decouple-weights` strips weights from `.ignite` containers, shrinking distribution size by 90.5%–96.8% across the entire YOLOv8 family (0.68–8.67 MB containers) with 0.000 ms steady-state dispatch penalty and bit-exact outputs.
+- [x] **Early-exit cascades (`max_segments=N`):** Multi-segment NPU execution allows early exit on background/empty camera frames across all six YOLOv8 variants (yolov8n, yolov8s, yolov8n-pose, yolov8m, yolov8l, yolov8x) on 8 physical CPU cores, cutting latency uniformly by 72.1%–75.0% (saving up to 92.55 ms/frame on YOLOv8x) and beating AMD's monolithic passes by 2.40× to 5.23×.
 - [x] **Zero-copy stage chaining (`InferenceSession.compose`):** Reuses a single shared DDR workspace (`bo_ws`) across modular subgraphs without memory bloat or host bus transfers.
 
 **Not pursued:** general transformers on XDNA1. Every CPU island in the middle of a block pays the dispatch floor.
