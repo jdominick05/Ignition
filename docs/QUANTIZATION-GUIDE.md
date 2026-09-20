@@ -27,7 +27,34 @@ per byte. Cutting the bytes is the model's job ([§1](#what-the-runtime-cannot-t
 
 ## 1. What a frame actually pays for
 
-A container keeps one flat workspace in DDR with a region per tensor. Every layer reads its input from DDR
+### Explicit segmentation and matting regions
+
+The source checkout supports `--dense-recipe bisenetv2 --task segment` and
+`--dense-recipe modnet_cut --task matte` in the graph compiler. These are hybrid
+recipes for the pinned XINT8 artifacts, not a general fallback partitioner.
+Accepted Conv/Relu regions use the existing integer engine; unsupported pooling,
+resize, normalization, gating, grouped convolution and small feature maps retain
+their original ONNX operators in declared CPU regions. Bilinear interpolation and
+branch joins are preserved. The recipe does not change the input resolution.
+
+Named host boundaries record every input and output with its ONNX name, shape,
+dtype, layout, scale and zero point. Only values consumed outside a region cross
+its boundary. CPU-only values remain in host memory for the frame; values consumed
+or produced by the NPU use the blocked DDR workspace. Workspace capacity is still
+reserved for host-only tensors, but they require no per-frame BO transfer. Legacy
+single-input host-region containers retain their previous interpretation.
+
+`segment` returns dense logits plus a class mask; `matte` returns the raw output
+plus an alpha image. A spatial output requires an explicit task instead of being
+inferred as classification. Region-local integer equality, extracted ONNX
+agreement, full-frame agreement and host-call counts are separate gates. Agreement
+on the local unlabeled images is not segmentation or matting accuracy. Read the
+[dense-model measurements](PERFORMANCE.md#segmentation-and-matting-hybrid-paths)
+before selecting a model for speed. These tasks currently load the canonical
+`npu/bisenetv2.py` and `npu/modnet.py` transforms from the ignite-xdna research
+checkout; they are not a standalone wheel capability.
+
+A container keeps one flat workspace in DDR with a region per device tensor. Each NPU layer reads its input from DDR
 through the MemTile into the cores and writes its output back to DDR, where the next layer reads it again.
 Nothing stays on chip between layers, so a layer's cost is almost entirely the bytes it drags across that
 boundary.

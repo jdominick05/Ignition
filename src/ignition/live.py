@@ -71,7 +71,8 @@ import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
 from ignition.pipelines.vision import (  # noqa: E402
-    TASK_CLASSIFY, TASK_DETECT, TASK_POSE, TASK_SUPER_RESOLUTION, TASKS, create_pipeline, draw_poses, infer_task)
+    TASK_CLASSIFY, TASK_DETECT, TASK_POSE, TASK_SUPER_RESOLUTION, TASK_SEGMENT, TASK_MATTE,
+    TASKS, create_pipeline, draw_poses, infer_task)
 from ignition.pipelines.yolo import draw_detections, is_ignite_container  # noqa: E402
 
 try:
@@ -420,6 +421,9 @@ def output_count(task: str, result: Any) -> str:
         return f"top-1 class {top.class_id} ({top.score:.2f})"
     if task == TASK_POSE:
         return f"{len(result.people)} people"
+    if task in (TASK_SEGMENT, TASK_MATTE):
+        a = result.mask if task == TASK_SEGMENT else result.alpha
+        return f"{a.shape[1]}x{a.shape[0]} {task}"
     return f"{result.image.shape[1]}x{result.image.shape[0]} output"
 
 
@@ -429,6 +433,11 @@ def render(frame: np.ndarray, display: Optional[np.ndarray], task: str, result: 
     the HUD."""
     if task == TASK_SUPER_RESOLUTION:
         canvas = result.image.copy()
+    elif task in (TASK_SEGMENT, TASK_MATTE):
+        from .pipelines.dense import family_module
+        family = family_module(task)
+        canvas = (family.overlay_segmentation(frame, result.mask) if task == TASK_SEGMENT else
+                  np.clip(frame.astype(np.float32) * result.alpha[:, :, None], 0, 255).astype(np.uint8))
     else:
         if display is None or display.shape != frame.shape:
             display = np.empty_like(frame)
@@ -585,7 +594,7 @@ def main(argv=None) -> int:
     print(f"[Ignition] source: {source.label}", flush=True)
 
     capacity = args.frames if args.frames > 0 else 10_000
-    g2g, pre, net, dispatch, host, readback, post, age = (Samples(capacity) for _ in range(8))
+    g2g, pre, net, dispatch, host, transfer, readback, post, age = (Samples(capacity) for _ in range(9))
     frame_limit = args.warmup + args.frames if args.frames > 0 else 0
     processed = timed = unique = npu_frames = detections = people = 0
     top1_counts: Dict[int, int] = {}
@@ -669,15 +678,19 @@ def main(argv=None) -> int:
                     readback.add(t["readback_ms"])
                 if "host_ms" in t:
                     host.add(t["host_ms"])
+                if "transfer_ms" in t:
+                    transfer.add(t["transfer_ms"])
                 if args.fresh and source.kind == "camera":
                     age.add((t_done - arrival) * 1000.0)
-                npu_frames += output_source(task, result) == "npu"
+                npu_frames += output_source(task, result) in ("npu", "hybrid")
                 if task == TASK_DETECT:
                     detections += len(result.detections)
                 elif task == TASK_CLASSIFY:
                     top1_counts[result.topk[0].class_id] = top1_counts.get(result.topk[0].class_id, 0) + 1
                 elif task == TASK_POSE:
                     people += len(result.people)
+                elif task in (TASK_SEGMENT, TASK_MATTE):
+                    output_shape = list((result.mask if task == TASK_SEGMENT else result.alpha).shape)
                 else:
                     output_shape = [int(v) for v in result.image.shape]
 
@@ -768,7 +781,8 @@ def main(argv=None) -> int:
             "fps_from_mean": 1000.0 / float(v.mean()),
             "stages_ms": {"preprocess": pre.mean(), "network": net.mean(), "postprocess": post.mean(),
                           **({"dispatch": dispatch.mean(), "readback": readback.mean()} if dispatch.count else {}),
-                          **({"host": host.mean()} if host.count else {})},
+                          **({"host": host.mean()} if host.count else {}),
+                          **({"transfer": transfer.mean()} if transfer.count else {})},
             "rss_mb": {"first_timed": rss_first, "end": rss_last, "drift": rss_last - rss_first},
             "npu_frames": npu_frames,
         })
@@ -778,6 +792,13 @@ def main(argv=None) -> int:
             record["top1_class_counts"] = {str(k): n for k, n in sorted(top1_counts.items())}
         elif task == TASK_POSE:
             record["people_per_frame"] = people / timed
+        elif task in (TASK_SEGMENT, TASK_MATTE):
+            record["output_shape"] = output_shape
+            a = result.mask if task == TASK_SEGMENT else result.alpha
+            record["dense_output"] = {"kind": "class_mask" if task == TASK_SEGMENT else "alpha",
+                                      "dtype": str(a.dtype), "layout": "HW", "shape": list(a.shape),
+                                      "raw_shape": list(result.tensor.shape), "source": result.source,
+                                      "min": float(a.min()), "max": float(a.max())}
         else:
             record["output_shape"] = output_shape
     if args.json:

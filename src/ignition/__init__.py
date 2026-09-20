@@ -30,7 +30,7 @@ def compile(
         model: Path to ONNX model, ignite-xdna .ignite container, ONNX ModelProto, or PartitionedGraph.
         backend: Execution target ('xdna1' for AMD Phoenix NPU, 'cpu' for ORT CPU reference).
         precision: Arithmetic precision ('int8' stationary vector layout).
-        pipeline: Optional specialized task pipeline ('yolo', 'async_yolo').
+        pipeline: Optional specialized task pipeline ('yolo', 'async_yolo', 'segment', 'matte').
         **kwargs: Additional backend or pipeline configuration options.
 
     Returns:
@@ -38,6 +38,12 @@ def compile(
     """
     if pipeline in ("yolo", "sync_yolo"):
         return YOLOPipeline(model, backend=backend, **kwargs)
+    elif pipeline in ("segment", "matte"):
+        from .pipelines.dense import DensePipeline
+        from .pipelines.yolo import NATIVE_BACKENDS
+        if is_ignite_container(model) and backend.lower() not in NATIVE_BACKENDS:
+            raise ValueError("an .ignite container requires the NPU backend")
+        return DensePipeline(model, pipeline, **kwargs)
     elif pipeline in ("async_yolo", "streaming_yolo", "stream_yolo", "streaming"):
         if is_ignite_container(model):
             # An .ignite container runs one synchronous NPU dispatch per frame; YOLOPipeline.stream()

@@ -191,6 +191,7 @@ On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.6
     carries none.
   - **Portability is unrecorded.** The manifest pins kernel and xclbin hashes but no NPU driver or XRT version,
     and the only verified setup is the one in the usage notes' [Compatibility](docs/USAGE.md#compatibility) table.
+  - **Split container resolution:** Splitting into an engine execution container (`.ignite-exec`, containing `engine.xclbin` and `insts.bin`) and a separate weights artifact (`wpackets.bin` or `.weights`) decouples bytecode from model weights. Precompiled engine bytecode can ship directly under Apache-2.0 in the release wheel, while weights are downloaded or supplied by the user under upstream terms without licence entanglement or toolchain dependencies.
 - [ ] The published v0.2.0 notes still quote the figures v0.3.1 corrects. Decide whether to edit them.
 
 ### 3. Hardware coverage
@@ -323,6 +324,22 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
     shortcuts.
   - Channel counts padded to multiples of 32.
   - Classifier tails (global average pool, Gemm) as CPU segments.
+- [ ] **Split containers and composable pipelines (with ignite-xdna Milestone 5.6):**
+  - **Motivation:** An `.ignite` container historically bundled manifest, microcode, and stationary weights into a single binary. Splitting decouples microcode from weights and enables composable vision pipelines and early-exit cascades in Ignition.
+  - **Measured Silicon Reality (Phoenix 8700G, 2026-09-20, Desktop 2):**
+    - Context recreation between stages costs **29.63 ms** (FATAL); all stages must execute within a single persistent `InferenceSession`.
+    - Intra-context NPU dispatch gap between linked segments costs only **6.6 µs**.
+    - Decoupled weight sidecars (`.weights`) incur **0.000 ms runtime dispatch penalty** and compress container file sizes by **92.4% on YOLOv8n** (8.84 MB -> 674 KB) and **95.9% on YOLOv8s** (30.76 MB -> 1.26 MB) with bit-exact silicon execution.
+    - Early-exit cascades via `max_segments=1` (cutting at layer 10) deliver a **73% latency reduction** (2.055 ms vs 7.556 ms), ideal for cascading edge detectors to bypass empty video frames.
+  - **Engine Capabilities (landed on `split-container-sizing`):**
+    - `ignite-compile --split-layer <IDX>` cuts execution into contiguous NPU segments (`insts_0.bin`, `insts_1.bin`) dispatched sequentially.
+    - `ignite-compile --decouple-weights` emits slimmed `.ignite` plus companion `.weights` sidecar.
+    - `serializer.py:decouple_container_weights()` enables in-place stripping of existing containers in ~15 ms without re-compiling.
+    - `InferenceSession` and `EngineSession` auto-resolve `.weights` sidecars and support `max_segments` early exit.
+  - **Consumer Integration Next Steps:**
+    - Support `--weights <file.weights>` in `live_ignition.py` and auto-discover `.weights` companion sidecars alongside `.ignite` containers.
+    - Surface early-exit cascading in `AsyncYOLOPipeline` to enable high-throughput (>400 FPS) background rejection before full head evaluation.
+    - Composable multi-task pipelines: dynamically assemble pipelines sharing a single backbone activation buffer (e.g. Detect + Pose) with zero duplicate computation.
 - [x] **Mixed precision through CPU segments, YOLO-World v2** (ignite-xdna `9096925`, `80ca69e`). The collapse is four
   C2fAttn output convolutions, not the attention. With those four as FP32 CPU steps a container scored 24.5 % mAP on the
   first 300 COCO val2017 images, identical to ONNX Runtime; AMD's stack runs that model at the same accuracy with 110
@@ -403,6 +420,11 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
 **App tasks built from the above:** instance segmentation (YOLOv8n-seg: its mask assembly is one small matrix
 multiply on the CPU, and the rest is convolutions, like pose), depth (FastDepth, MiDaS small), matting (MODNet),
 semantic segmentation (BiSeNetV2), oriented boxes, and open-vocabulary detection (YOLO-World v2, item above).
+
+**Split and Modular Containers (Decoupled Weights & Subgraph Cascades):**
+- [x] **Decoupled stationary weights (`.weights` sidecar):** `serializer.py` and `ignite-compile --decouple-weights` strips weights from `.ignite` containers, shrinking distribution size by 92.4% on YOLOv8n (8.8 MB -> 674 KB) and 95.9% on YOLOv8s (30.76 MB -> 1.26 MB) with 0.000 ms steady-state dispatch penalty and bit-exact outputs.
+- [x] **Early-exit cascades (`max_segments=N`):** Multi-segment NPU execution allows early exit on background/empty camera frames (e.g. YOLOv8s shallow backbone runs at 4.72 ms / 211.8 FPS, saving 12.58 ms per background frame; 72.7% latency and energy reduction).
+- [x] **Zero-copy stage chaining (`InferenceSession.compose`):** Reuses a single shared DDR workspace (`bo_ws`) across modular subgraphs without memory bloat or host bus transfers.
 
 **Not pursued:** general transformers on XDNA1. Every CPU island in the middle of a block pays the dispatch floor.
 

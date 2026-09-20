@@ -262,7 +262,9 @@ def detect_objects(model_path, input_path, output_path, backend, conf, iou, stre
 @click.option("--timeout", default=1800.0, show_default=True, type=float, help="Seconds allowed per model process.")
 @click.option("--power-mode", type=click.Choice(["efficiency", "balanced", "performance"]), default=None,
               help="Host-thread power mode for .ignite containers, passed to every run (default: balanced).")
-def run_model_suite(models, source, frames, warmup, out_dir, timeout, power_mode):
+@click.option("--task", type=click.Choice(["detect", "pose", "classify", "super_resolution", "segment", "matte"]),
+              default=None, help="Explicit task for all models; containers otherwise declare their task.")
+def run_model_suite(models, source, frames, warmup, out_dir, timeout, power_mode, task):
     """Run each model in its own ignition.live process and write one JSON record per model."""
     from ignition.suite import default_source, format_table, run_suite
 
@@ -283,7 +285,7 @@ def run_model_suite(models, source, frames, warmup, out_dir, timeout, power_mode
     click.echo("--------------------------------------------------------------------------------")
     try:
         index = run_suite([Path(m) for m in models], out, str(src), frames, warmup, timeout, echo=click.echo,
-                          power_mode=power_mode)
+                          power_mode=power_mode, task=task)
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
         click.secho(f"[-] {exc}", fg="red")
         sys.exit(2)

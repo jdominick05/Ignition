@@ -37,7 +37,9 @@ TASK_DETECT = "detect"
 TASK_CLASSIFY = "classify"
 TASK_SUPER_RESOLUTION = "super_resolution"
 TASK_POSE = "pose"
-TASKS = (TASK_DETECT, TASK_CLASSIFY, TASK_SUPER_RESOLUTION, TASK_POSE)
+TASK_SEGMENT = "segment"
+TASK_MATTE = "matte"
+TASKS = (TASK_DETECT, TASK_CLASSIFY, TASK_SUPER_RESOLUTION, TASK_POSE, TASK_SEGMENT, TASK_MATTE)
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -487,4 +489,7 @@ def create_pipeline(model_path: Union[str, Path], task: Optional[str] = None, co
     if task == TASK_POSE:
         return task, PosePipeline(path, backend=backend, conf_thres=conf_thres, iou_thres=iou_thres,
                                   device_id=device_id)
+    if task in (TASK_SEGMENT, TASK_MATTE):
+        from .dense import DensePipeline
+        return task, DensePipeline(path, task, device_id=device_id)
     raise ValueError(f"unknown task {task!r}; expected one of {TASKS}")

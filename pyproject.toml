@@ -60,5 +60,6 @@ testpaths = [
     "tests/test_host_segments.py",
     "tests/test_badges.py",
     "tests/test_readme_words.py",
+    "tests/test_dense_tasks.py",
 ]
 

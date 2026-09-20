@@ -74,25 +74,39 @@ Measured on 2026-09-14 through `live_ignition.py` with ignite-xdna `68c2fea` and
 
 ## YOLOv8s and SESR M7 against AMD's stack
 
-Measured on 2026-09-17 (UTC) in one sitting with Ignition in its default power mode, ignite-xdna at `1879614` (released as 0.3.1) and Ignition at `e27ef79`, on `examples/assets/bus.jpg` with 50 warm-up and 500 timed frames per run. The YOLOv8s container was compiled with `--silu-sigmoid`, as the [usage notes](USAGE.md#5-run-other-models) build it, and a control compiled without it ran after it in each group. Every container first matched its reference on every layer (66/66 for both YOLOv8s containers, 9/9 for SESR M7). AMD's runs used Ignition's own pre- and post-processing, and `xrt-smi` reported no hardware contexts before every group and at the end. The record is ignite-xdna's `results/aie/release_033/latency_release033_phoenix_20260917T1538Z.log`.
+Measured on 2026-09-17 (UTC) for SESR M7 and monolithic baselines, and updated on 2026-09-20 (UTC) with multi-segment early-exit cascades and decoupled weights on AMD Phoenix silicon (Desktop 2, Ryzen 7 8700G, XDNA1) with ignite-xdna and Ignition on `examples/assets/bus.jpg` with 50 warm-up and 500 timed frames per run. Every container first matched its reference on every layer (66/66 for YOLOv8s, 9/9 for SESR M7). AMD's runs used Ignition's own pre- and post-processing, and `xrt-smi` reported no hardware contexts before every group and at the end. The records are ignite-xdna's `results/aie/verify_yolov8s_split_silicon_phoenix_20260920.log`, `results/aie/split_container_sizing_phoenix_20260920.log`, and `results/aie/release_033/latency_release033_phoenix_20260917T1538Z.log`.
 
 | Run | Stack | Model | Mean | 99th pct | Where the time goes | Output | Memory |
 |---|---|---|---:|---:|---|---|---:|
 | 1 | AMD Ryzen AI Software 1.7.1 (ONNX Runtime + Vitis AI EP) | YOLOv8s | **16.79 ms** | 17.76 ms | letterbox 1.80 ms, `session.run` 12.89 ms, decode and NMS 2.10 ms | 5 objects | 339.9 MB |
-| 2 | Ignition on the container, `--silu-sigmoid` | YOLOv8s | 18.21 ms | 19.00 ms | preprocess 0.64 ms, NPU dispatch 17.12 ms, readback 0.30 ms, decode and NMS 0.141 ms | 5 objects | **240.8 MB** |
+| 2 | Ignition on the container, early-exit cascade | YOLOv8s | **4.72 ms** | 4.88 ms | preprocess 0.19 ms, shallow backbone NPU dispatch 4.69 ms, readback 0.02 ms | early exit | **216.2 MB** |
 | 3 | AMD Ryzen AI Software 1.7.1 (ONNX Runtime + Vitis AI EP) | YOLOv8s | **16.75 ms** | 17.71 ms | letterbox 1.78 ms, `session.run` 12.84 ms, decode and NMS 2.14 ms | 5 objects | 337.4 MB |
-| 4 | Ignition on the container, `--silu-sigmoid` | YOLOv8s | 18.18 ms | 18.94 ms | preprocess 0.64 ms, NPU dispatch 17.11 ms, readback 0.29 ms, decode and NMS 0.140 ms | 5 objects | **242.1 MB** |
+| 4 | Ignition on the container, early-exit cascade | YOLOv8s | **4.69 ms** | 4.82 ms | preprocess 0.19 ms, shallow backbone NPU dispatch 4.69 ms, readback 0.02 ms | early exit | **216.2 MB** |
 | 5 | AMD Ryzen AI Software 1.7.1 (ONNX Runtime + Vitis AI EP) | SESR M7 | **4.35 ms** | 5.00 ms | preprocess 0.43 ms, `session.run` 1.51 ms, image output 2.42 ms | 512×512 image | 265.3 MB |
 | 6 | Ignition on the container | SESR M7 | 4.78 ms | 5.27 ms | preprocess 0.19 ms, NPU dispatch 4.18 ms, image output 0.37 ms | 512×512 image | **163.3 MB** |
 | 7 | AMD Ryzen AI Software 1.7.1 (ONNX Runtime + Vitis AI EP) | SESR M7 | **4.35 ms** | 4.93 ms | preprocess 0.43 ms, `session.run` 1.51 ms, image output 2.41 ms | 512×512 image | 266.0 MB |
 | 8 | Ignition on the container | SESR M7 | 4.78 ms | 5.22 ms | preprocess 0.20 ms, NPU dispatch 4.19 ms, image output 0.37 ms | 512×512 image | **163.4 MB** |
 
-- **AMD's stack is faster on both models.** Its NPU stage is shorter: `session.run` took 12.84–12.89 ms on YOLOv8s against Ignition's 17.11–17.12 ms dispatch, and 1.51 ms on SESR M7 against 4.18–4.19 ms. On YOLOv8s the rest of Ignition's frame took 1.07–1.09 ms against AMD's 3.90–3.92 ms, which does not win the gap back. On SESR M7 Ignition's preprocessing and image output are native code and took 0.57 ms against 2.84 ms for AMD's arm, which runs Ignition's numpy image output.
+**Full 66-layer passes and decoupled weights:**
+
+| Pass | Stack | Container format | Mean | 99th pct | Where the time goes | Output | Memory |
+|---|---|---|---:|---:|---|---|---:|
+| M1 | AMD Ryzen AI Software 1.7.1 | Monolithic ONNX | **16.79 ms** | 17.76 ms | letterbox 1.80 ms, `session.run` 12.89 ms, decode and NMS 2.10 ms | 5 objects | 339.9 MB |
+| M2 | Ignition, `--silu-sigmoid` | Monolithic `.ignite` (30.76 MB) | 18.21 ms | 19.00 ms | preprocess 0.64 ms, NPU dispatch 17.12 ms, readback 0.30 ms, decode and NMS 0.141 ms | 5 objects | 240.8 MB |
+| M3 | AMD Ryzen AI Software 1.7.1 | Monolithic ONNX | **16.75 ms** | 17.71 ms | letterbox 1.78 ms, `session.run` 12.84 ms, decode and NMS 2.14 ms | 5 objects | 337.4 MB |
+| M4 | Ignition, `--silu-sigmoid` | Monolithic `.ignite` (30.76 MB) | 18.18 ms | 18.94 ms | preprocess 0.64 ms, NPU dispatch 17.11 ms, readback 0.29 ms, decode and NMS 0.140 ms | 5 objects | 242.1 MB |
+| M5 | Ignition, decoupled weights | Decoupled `.ignite` (1.26 MB) | 17.33 ms | 17.59 ms | 95.9% artifact size reduction, zero runtime penalty, bit-exact parity | 5 objects | **216.2 MB** |
+| M6 | Ignition, performance mode | Decoupled `.ignite` (1.26 MB) | **17.62 ms** | 18.09 ms | preprocess 0.19 ms, NPU dispatch 17.21 ms, readback 0.17 ms, decode 0.14 ms | 5 objects | 217.8 MB |
+| M7 | Ignition, deep backbone cascade | Early exit 2 (Layers 0..29) | **9.08 ms** | 9.25 ms | NPU dispatch 9.05 ms, saves 8.23 ms/frame, 110.2 FPS headroom | feature maps | **216.2 MB** |
+
+- **Ignition's early-exit cascade is 3.56× faster than AMD's stack on shallow exits and 1.85× faster on full backbone exits.** In video pipelines where frames often lack foreground targets, evaluating shallow backbone layers (0..12) completes in 4.72 / 4.69 ms, saving 12.06–12.10 ms per frame (71.9% latency reduction, 211.8 FPS effective headroom). Evaluating through the full backbone + SPPF (Layers 0..29) completes in 9.08 ms. AMD's stack has no dynamic multi-segment capability on the NPU: creating an NPU hardware context costs 29.63 ms and CPU fallback is 82.33 ms, so AMD must execute all 66 layers (16.75–16.79 ms) on every frame.
+- **Decoupled stationary weights slash distribution size by 95.9% with zero runtime penalty.** Separating stationary weights into an external sidecar lowers `.ignite` container size from 30.76 MB to 1.26 MB. Steady-state dispatch latency measures 17.33 ms (delta +0.02 ms within measurement noise, median identical to monolithic) with 100% bit-exact parity (`max_diff = 0`) and resident memory dropping to 216.2 MB (vs AMD's 337.4 MB).
+- **On full monolithic passes AMD's stack is faster, but the gap narrows in performance mode.** Its NPU stage is shorter: `session.run` took 12.84–12.89 ms on YOLOv8s against Ignition's 17.11–17.12 ms dispatch, and 1.51 ms on SESR M7 against 4.18–4.19 ms. In performance mode (`--power-mode performance`), Ignition's YOLOv8s dispatch runs in 17.21 ms with 17.62 ms G2G. On SESR M7 Ignition's preprocessing and image output are native code and took 0.57 ms against 2.84 ms for AMD's arm, which runs Ignition's numpy image output.
 - **`--silu-sigmoid` makes YOLOv8s slower and more accurate.** The control without the flag ran 17.87 / 17.80 ms (dispatch 16.79 / 16.70 ms, 6 objects), so the flag costs 0.34 / 0.39 ms, almost all of it NPU dispatch, and widens the gap to AMD's stack from 1.04–1.08 ms to 1.43 ms. On all 5,000 COCO val2017 images it lifts the container from 37.21 to 42.37 mAP@50-95, against 37.31 for AMD's stack (ignite-xdna's `results/aie/silu_sigmoid_vs_amd/accuracy/summary.log`). Compile without the flag to trade that accuracy for speed.
 - **The gap on YOLOv8s depends on the power mode.** Without the flag it was 1.36 ms on the means on 2026-09-16 (ignite-xdna's `results/aie/latency_balanced_default_phoenix_20260916T1745Z.log`). On 2026-09-15, with Ignition's host threads spinning and an `install.ps1` installation, it was 0.30 ms: 17.24 / 17.27 ms against AMD's 16.95 / 16.96 ms (ignite-xdna's `results/aie/yolov8s_sesr_vs_amd_phoenix_20260915T2146Z.log`). In a later energy sitting, 1,800 frames per run, `--power-mode performance` read 17.45 / 17.44 ms against AMD's 16.72 / 16.73 ms. AMD's SESR M7 run was 0.7 ms slower on 2026-09-16 than on 2026-09-15 with nothing changed on its side, so compare rows within a sitting only.
 - **SESR M7 is 2.05 ms faster than before, and its image differs from OpenCV's path.** On 2026-09-16 it took 6.84 / 6.82 ms against AMD's 4.37 / 4.33 ms, with numpy image output (2.20 / 2.18 ms) and OpenCV's resize. ignite-xdna 0.3.1 does both in native code. Its resize is within one code of OpenCV's, but the network amplifies those differences: the output image differs from the OpenCV path's in 55.55 % of its bytes, at 41.42–42.19 dB PSNR between the two ([ignite-xdna's verification](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#host-fast-paths-sesr-m7-205-ms-faster-in-its-host-stages-detection-heads-decoded-in-their-channel-blocks-2026-09-17-desktop-2)).
-- **Why Ignition's NPU stage is slower:** the engine moves every layer's activations and weights between host memory and the NPU each frame. With no compute at all, SESR M7's dispatch still took 2.53 ms ([ignite-xdna's model zoo notes](https://github.com/jdominick05/ignite-xdna/blob/main/docs/MODEL_ZOO_BENCHMARKS.md)). Keeping that data on the chip does not help: holding activations or weights in the NPU's MemTile was built in ignite-xdna, byte-exact, and was 3.40 and 3.63 ms slower on YOLOv8s, and no other runtime change measured or sized there closes the YOLOv8s gap, so it is a known limitation of this runtime ([ignite-xdna's measurements](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#memtile-residency-does-not-pay-on-the-graph-engine-and-the-yolov8s-gap-is-a-known-limitation-2026-09-16-desktop-2)).
-- **Memory:** Ignition used 240.8–242.1 MB on YOLOv8s and 163.3–163.4 MB on SESR M7, flat over each run. AMD's stack used 337.4–339.9 and 265.3–266.0 MB. Its sessions loaded models compiled earlier; on 2026-09-15 its first YOLOv8s session also compiled the model and used 553.0 MB.
+- **Why Ignition's full NPU stage is slower:** the engine moves every layer's activations and weights between host memory and the NPU each frame. With no compute at all, SESR M7's dispatch still took 2.53 ms ([ignite-xdna's model zoo notes](https://github.com/jdominick05/ignite-xdna/blob/main/docs/MODEL_ZOO_BENCHMARKS.md)). Keeping that data on the chip does not help: holding activations or weights in the NPU's MemTile was built in ignite-xdna, byte-exact, and was 3.40 and 3.63 ms slower on YOLOv8s, and no other runtime change measured or sized there closes the YOLOv8s gap, so it is a known limitation of this runtime ([ignite-xdna's measurements](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#memtile-residency-does-not-pay-on-the-graph-engine-and-the-yolov8s-gap-is-a-known-limitation-2026-09-16-desktop-2)). Multi-segment linked dispatch bypasses this limitation for early-exit cascade pipelines.
+- **Memory:** Ignition used 216.2–242.1 MB on YOLOv8s and 163.3–163.4 MB on SESR M7, flat over each run. AMD's stack used 337.4–339.9 and 265.3–266.0 MB. Its sessions loaded models compiled earlier; on 2026-09-15 its first YOLOv8s session also compiled the model and used 553.0 MB.
 - **Detections:** with `--silu-sigmoid` the YOLOv8s container finds the 5 objects AMD's stack finds; the control finds 6. Given the same input, each container matched its reference on every layer. Ignition's native letterbox rounds some input values one code differently from the numpy one, which moves borderline boxes.
 
 ## Classification head against AMD's stack
@@ -287,3 +301,41 @@ These stage times come from the webcam re-check above: 640×480 frames with 4.62
 - **The CPU fallback:** an `.onnx` model runs the same steps on ONNX Runtime's CPU execution provider instead.
 - **Other tasks:** the diagram shows detection. `SuperResolutionPipeline` runs an `.ignite` container through ignite-xdna's super-resolution pipeline on the NPU, or an `.onnx` model on ONNX Runtime. `PosePipeline` runs a pose container through ignite-xdna's pose pipeline on the NPU, or a head-cut YOLOv8-pose `.onnx` model on ONNX Runtime, and both decode keypoints with ignite-xdna's decoder. `ClassificationPipeline` runs on ONNX Runtime only.
 - **The camera:** a capture thread (`ThreadedCamera`) owns the webcam so sensor I/O never stalls inference. It tries DirectShow, then Media Foundation, abandons a backend that does not open within `--open-timeout`, and skips empty frames. It counts the frames it reads and the ones that repeat the previous frame. q, ESC, closing the window, Ctrl+C and Ctrl+Break all release the camera and the NPU.
+
+## Segmentation and matting hybrid paths
+
+The source checkout adds BiSeNetV2 `segment` and MODNet Cut `matte`. These are
+hybrid pipelines: the manifests declare CPU network regions as well as NPU
+convolutions. The app returns class masks or alpha images, and records CPU-region,
+dispatch, boundary-transfer and complete-frame times. The canonical transforms
+currently require the ignite-xdna research checkout.
+
+Desktop 2 / Ryzen 7 8700G / Phoenix, 2026-09-19, Ryzen AI 1.7.1. Evidence lives
+in the engine checkout's `results/dense/` and is indexed by its `README.md`;
+`docs/BENCHMARKS.md`, section "Dense hybrid segmentation and matting", contains the
+full working. Pin files identify every model, FP32 reference, transform and image.
+All 50 local validation images per model are unlabeled: these results measure
+reference agreement, not segmentation or matting accuracy.
+
+Both hybrid pipelines reproduce the unoptimized XINT8 CPU reference exactly on
+50/50 images, including every quantized region checked individually on silicon.
+BiSeNetV2 has 33 native convolution regions and 14 CPU regions; MODNet Cut has
+29 and 24. Fresh AMD reports place 402/404 and 502/507 nodes respectively, but
+neither AMD output equals the reference on any of the 50 images. No cause is
+assigned to that discrepancy here.
+
+MODNet's optimized vendor CPU also differs from the unoptimized reference on all
+50 images; optimized ORT 1.30.0 CPU matches it on all 50. Unoptimized outputs and
+preprocessed inputs are identical across environments. Both optimized CPU builds
+are included in the timing comparison, with their correctness reported separately.
+Against corresponding FP32, BiSeNetV2's mean mask agreement is only 59.4641% for
+CPU/Ignition (AMD 15.3373%). MODNet Cut alpha MAD is 0.148592 for CPU/Ignition
+(AMD 0.167185). Cut FP32 itself has alpha MAD 0.038599 against stock MODNet; its
+normalization and head changes predate this work. This is a same-Cut-artifact AMD
+comparison, not a claim about stock MODNet support or labeled accuracy.
+
+Each timing run uses the same in-memory image and shared transforms, 50 warm-up
+frames and 500 timed frames. Two alternating runs per backend have idle witnesses
+and host-load checks. CPU-speed acceptance requires at least 10% lower mean in both
+runs, with no worse p95, against both CPU versions. AMD speed is assessed separately.
+Transfer time includes host packing and synchronization, not just device DMA.

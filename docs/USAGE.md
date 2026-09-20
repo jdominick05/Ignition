@@ -176,9 +176,43 @@ ignition suite ../ignite-xdna/build/yolov8n_full.ignite ../ignite-xdna/models/yo
 - **One record per model:** `--out` gets `<model>.json`, which holds the app's `--json` summary plus the command, its return code, the Ignition and ignite-xdna versions with `git describe --dirty` of their checkouts, and, for an `.ignite` container, what `xrt-smi` reported before and after the run. A `<model>.log` and an `index.json` sit beside them. Checkout paths, the output directory and the Windows profile directory appear as labels.
 - **Nothing overwritten:** an existing `--out` directory is refused. The command exits 1 if a run fails, records no timed frames, or starts while another hardware context is on the NPU, which would make its latency contention.
 
+## Segmentation and portrait matting
+
+The source checkout adds `segment` (BiSeNetV2) and `matte` (MODNet Cut) to the
+pipeline factory, app and suite. Compile the unchanged quantized artifact in the
+ignite-xdna checkout, through its research wrapper and IRON environment:
+
+```bash
+bash scripts/research-lowlevel.sh --npu --checks-only --log results/dense/compile_local.log --seconds 300 --rss-gib 10 -- bash scripts/research-iron.sh -m ignite_xdna.compiler.cli --engine graph --input models/bisenetv2_fp32_xint8.onnx --output build/bisenetv2_dense.ignite --dense-recipe bisenetv2 --task segment
+```
+
+For matting, use `models/modnet/modnet_cut_xint8_calibfix.onnx`,
+`--dense-recipe modnet_cut --task matte` and a separate output/log path.
+Run a container through `python -m ignition.live --model <container> --source
+<image> --headless --warmup 50 --frames 500 --json <record.json>`. Its task is read
+from the manifest. An ONNX input needs explicit `--task segment` or `--task matte`;
+`ignition suite` accepts the same option. Every device run must remain serialized
+through the research wrapper. Suite records include dense output shape, dtype,
+source and separate CPU-region, dispatch and transfer times.
+
+```python
+import ignition
+with ignition.compile("build/modnet_cut_dense.ignite", pipeline="matte") as pipe:
+    result = pipe.predict("portrait.jpg")
+    alpha = result.alpha       # float32 HW at the source image size
+    raw = result.tensor        # original dense NCHW output
+```
+
+Segmentation supplies `result.mask` (uint8 class indices) instead of `alpha`.
+Visualization overlays the class palette or composites the alpha over black.
+These recipes contain explicit CPU network regions and report `xdna1-hybrid`.
+The canonical family transforms require the ignite-xdna source checkout. See the
+[measurements](PERFORMANCE.md#segmentation-and-matting-hybrid-paths) and
+[model-building rules](QUANTIZATION-GUIDE.md#explicit-segmentation-and-matting-regions).
+
 ## Limitations
 
-- **YOLO-shaped models only on the NPU.** The released packages run YOLOv8n, YOLOv8s, SESR M7, YOLOv8n-pose and YOLO11n on the NPU. ResNet50 classification runs on the CPU in this app: the engine has a `.ignite` lowering that puts a whole classifier on the device for models it accepts, and one of fifteen XINT8 classifiers reaches a schedule at all ([measurements](PERFORMANCE.md#classification-head-against-amds-stack)); none of it is wired into `live_ignition.py` yet, and other ONNX models run on the CPU.
+- **Model coverage is explicit.** The released packages run YOLOv8n, YOLOv8s, SESR M7, YOLOv8n-pose and YOLO11n on the NPU. The source checkout additionally supports the hybrid segmentation and matting recipes above. ResNet50 classification runs on the CPU in this app: the engine has a `.ignite` lowering that puts a whole classifier on the device for models it accepts, and one of fifteen XINT8 classifiers reaches a schedule at all ([measurements](PERFORMANCE.md#classification-head-against-amds-stack)); none of it is wired into `live_ignition.py` yet, and other ONNX models run on the CPU.
 - **A build step.** The `.ignite` container is built from AMD Quark's quantized model with ignite-xdna and the mlir-aie toolchain; it is not a pip install.
 - **AMD's stack is faster on some models.** In the default power mode, on YOLOv8s (16.75–16.79 against 18.18–18.21 ms with `--silu-sigmoid`, 17.80–17.87 ms without) and SESR M7 (4.35 against 4.78 ms) its NPU stage outruns the engine, which moves activations and weights to the NPU every frame ([measurements](PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)). On YOLOv8s this is a known limitation: no runtime change tried in ignite-xdna closes it.
 - **Narrow hardware support.** Only Phoenix has been verified. Hawk Point is untested, and Strix-class NPUs and Linux are not supported.
