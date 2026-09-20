@@ -49,7 +49,7 @@ plus an alpha image. A spatial output requires an explicit task instead of being
 inferred as classification. Region-local integer equality, extracted ONNX
 agreement, full-frame agreement and host-call counts are separate gates. Agreement
 on the local unlabeled images is not segmentation or matting accuracy. Read the
-[dense-model measurements](PERFORMANCE.md#segmentation-and-matting-hybrid-paths)
+[dense-model measurements](PERFORMANCE.md#segmentation-and-matting-hybrid-paths-withdrawn-pending-their-evidence)
 before selecting a model for speed. These tasks currently load the canonical
 `npu/bisenetv2.py` and `npu/modnet.py` transforms from the ignite-xdna research
 checkout; they are not a standalone wheel capability.

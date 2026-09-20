@@ -207,7 +207,7 @@ Segmentation supplies `result.mask` (uint8 class indices) instead of `alpha`.
 Visualization overlays the class palette or composites the alpha over black.
 These recipes contain explicit CPU network regions and report `xdna1-hybrid`.
 The canonical family transforms require the ignite-xdna source checkout. See the
-[measurements](PERFORMANCE.md#segmentation-and-matting-hybrid-paths) and
+[measurements](PERFORMANCE.md#segmentation-and-matting-hybrid-paths-withdrawn-pending-their-evidence) and
 [model-building rules](QUANTIZATION-GUIDE.md#explicit-segmentation-and-matting-regions).
 
 ## Limitations
