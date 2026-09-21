@@ -189,6 +189,18 @@ param(
         return $null
     }
 
+    function Update-ProcessPath {
+        # winget and the installers it runs write PATH into the registry, but this process keeps the
+        # environment it started with, so a tool installed a moment ago is not on PATH until PATH is rebuilt
+        # here. Without this, a first run on a fresh machine can install a tool and then fail to find it.
+        $parts = @()
+        foreach ($scope in @('Machine', 'User')) {
+            $value = [Environment]::GetEnvironmentVariable('Path', $scope)
+            if ($value) { $parts += $value }
+        }
+        if ($parts.Count -gt 0) { $env:Path = ($parts -join ';') }
+    }
+
     function Install-WithWinget([string]$Id, [string[]]$Extra) {
         $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
         if (-not $winget) {
@@ -197,6 +209,21 @@ param(
         Write-Note "installing $Id with winget"
         & $winget.Source install --id $Id --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @Extra
         # winget also exits non-zero when the package is already there; the caller looks for the program again.
+        Update-ProcessPath
+    }
+
+    function Invoke-Checked([string]$Exe, [string[]]$Arguments, [string]$What) {
+        # Assert-Exit reports only an exit code, which on a failed install says nothing about which of the
+        # several commands in a step failed. This names the step and prints the command so it can be pasted.
+        & $Exe @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            $shown = @()
+            foreach ($argument in $Arguments) {
+                if ("$argument" -match '\s') { $shown += ('"' + $argument + '"') } else { $shown += "$argument" }
+            }
+            $line = '"' + $Exe + '" ' + ($shown -join ' ')
+            throw ("{0} failed with exit code {1}. The command was: {2}" -f $What, $LASTEXITCODE, $line)
+        }
     }
 
     function Test-XrtSdk {
@@ -237,8 +264,7 @@ param(
             Remove-Item -Recurse -Force $Venv -ErrorAction Stop
         }
         if (-not (Test-Path $venvPython)) {
-            & $Base -m venv $Venv
-            Assert-Exit "Creating $Venv"
+            Invoke-Checked $Base @('-m', 'venv', $Venv) "Creating the Python 3.$Minor environment at $Venv"
         }
         return $venvPython
     }
@@ -368,28 +394,20 @@ param(
     Write-Step 'Python 3.13 environment and NPU compiler toolchain'
     $venv = Join-Path $InstallRoot 'venv'
     $venvPython = New-Venv $pythonExe $venv '13'
-    & $venvPython @pip --upgrade pip
-    Assert-Exit 'Upgrading pip'
-    & $venvPython @pip aiofiles rich 'ml_dtypes>=0.5.4' cloudpickle 'numpy>=2.5.1,<3.0'
-    Assert-Exit "Installing mlir-aie's Python requirements"
-    & $venvPython @pip $Eudsl[0] -f $Eudsl[1] '--config-settings=EUDSL_PYTHON_EXTRAS_HOST_PACKAGE_PREFIX=aie'
-    Assert-Exit 'Installing eudsl-python-extras'
-    & $venvPython @pip $MlirAie[0] -f $MlirAie[1]
-    Assert-Exit 'Installing mlir-aie'
-    & $venvPython @pip $LlvmAie[0] -f $LlvmAie[1]
-    Assert-Exit 'Installing llvm-aie (Peano)'
+    Invoke-Checked $venvPython ($pip + @('--upgrade', 'pip')) 'Upgrading pip in the NPU environment'
+    Invoke-Checked $venvPython ($pip + @('aiofiles', 'rich', 'ml_dtypes>=0.5.4', 'cloudpickle', 'numpy>=2.5.1,<3.0')) "Installing mlir-aie's Python requirements"
+    Invoke-Checked $venvPython ($pip + @($Eudsl[0], '-f', $Eudsl[1], '--config-settings=EUDSL_PYTHON_EXTRAS_HOST_PACKAGE_PREFIX=aie')) 'Installing eudsl-python-extras'
+    Invoke-Checked $venvPython ($pip + @($MlirAie[0], '-f', $MlirAie[1])) 'Installing mlir-aie'
+    Invoke-Checked $venvPython ($pip + @($LlvmAie[0], '-f', $LlvmAie[1])) 'Installing llvm-aie (Peano)'
     Repair-LlvmAie $venv
-    & $venvPython @pip -e $igniteXdna -e $ignition
-    Assert-Exit 'Installing ignite-xdna and Ignition'
+    Invoke-Checked $venvPython ($pip + @('-e', $igniteXdna, '-e', $ignition)) 'Installing ignite-xdna and Ignition'
 
     $modelVenv = Join-Path $InstallRoot 'venv-models'
     if (-not $SkipModelTools) {
         Write-Step 'Python 3.12 environment for exporting and quantizing models'
         $modelPythonExe = New-Venv $modelBase $modelVenv '12'
-        & $modelPythonExe @pip --upgrade pip
-        Assert-Exit 'Upgrading pip in the model environment'
-        & $modelPythonExe @pip @ModelTools
-        Assert-Exit 'Installing AMD Quark, Ultralytics and the Hugging Face CLI'
+        Invoke-Checked $modelPythonExe ($pip + @('--upgrade', 'pip')) 'Upgrading pip in the model environment'
+        Invoke-Checked $modelPythonExe ($pip + $ModelTools) 'Installing AMD Quark, Ultralytics and the Hugging Face CLI'
     }
 
     Write-Step 'Session setup scripts'
