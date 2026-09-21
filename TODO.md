@@ -427,8 +427,25 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
   on the CPU.
 
 **App tasks built from the above:** instance segmentation (YOLOv8n-seg: its mask assembly is one small matrix
-multiply on the CPU, and the rest is convolutions, like pose), depth (FastDepth, MiDaS small), matting (MODNet),
-semantic segmentation (BiSeNetV2), oriented boxes, and open-vocabulary detection (YOLO-World v2, item above).
+multiply on the CPU, and the rest is convolutions, like pose), depth (FastDepth, MiDaS small), oriented boxes,
+and open-vocabulary detection (YOLO-World v2, item above).
+
+- [x] **Matting (MODNet Cut) and semantic segmentation (BiSeNetV2) run, and lose to AMD's stack.** Landed in
+  ignite-xdna on 2026-09-21 as `--dense-recipe`, boundary version 2 and `DenseTensorSession`; `--task
+  segment|matte` works from the source checkout with no Ignition code change, 14 and 24 host calls per frame
+  against the manifest's declared regions. Measured 43.20 ms against AMD's 20.59 on BiSeNetV2 and 87.35 against
+  31.00 on MODNet Cut - 2.10x and 2.82x slower - and **structurally**, because CPU-region compute alone
+  (`npu_ms + host_ms`) is 1.47x and 1.73x AMD's whole frame, so no transport change reaches it. They are exact
+  against the CPU reference on 50 of 50 images where AMD's stack is exact on none, and agree with FP32 far more
+  closely (BiSeNetV2 mask agreement 59.4641% against 15.3373%), but those are agreement on unlabeled local sets,
+  not accuracy. No badge: a family that loses on speed with no labeled accuracy earns neither half of one.
+  [measurements](docs/PERFORMANCE.md#segmentation-and-matting-hybrid-paths-against-amds-stack).
+- [ ] Give these two a labelled evaluation. It is the one thing that could make them releasable: AMD's XINT8
+  BiSeNetV2 is separately recorded collapsing on the DPU to 2.44% mIoU, and the FP32 agreement above points the
+  same way, so a labelled run may show an accuracy win large enough to outweigh losing on speed. It needs one
+  Ignition arm on a set that already exists, not a new dataset.
+- [ ] Kernels for the operations that forced the host regions (pooling, resize, normalization, gating, grouped
+  convolution, small maps). That, not a boundary protocol, is what would make a dense model fast here.
 
 **Split and Modular Containers (Decoupled Weights & Subgraph Cascades):**
 - [x] **Decoupled stationary weights (`.weights` sidecar):** `serializer.py` and `ignite-compile --decouple-weights` strips weights from `.ignite` containers, shrinking distribution size by **92.3%–95.9%** across the entire YOLOv8 family (0.68–8.67 MB containers) with 0.000 ms steady-state dispatch penalty and bit-exact outputs. (An earlier draft read 90.5%–96.8%, wider than any model measured.)
