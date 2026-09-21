@@ -49,8 +49,10 @@ plus an alpha image. A spatial output requires an explicit task instead of being
 inferred as classification. Region-local integer equality, extracted ONNX
 agreement, full-frame agreement and host-call counts are separate gates. Agreement
 on the local unlabeled images is not segmentation or matting accuracy. Read the
-[dense-model measurements](PERFORMANCE.md#segmentation-and-matting-hybrid-paths-withdrawn-pending-their-evidence)
-before selecting a model for speed. These tasks currently load the canonical
+[dense-model measurements](PERFORMANCE.md#segmentation-and-matting-hybrid-paths-against-amds-stack)
+before selecting a model for speed: both recipes are slower than AMD's stack, by 2.10x on
+BiSeNetV2 and 2.82x on MODNet Cut, and their CPU regions alone already exceed AMD's whole
+frame, so a dense model is a correctness choice here and not a speed one. These tasks currently load the canonical
 `npu/bisenetv2.py` and `npu/modnet.py` transforms from the ignite-xdna research
 checkout; they are not a standalone wheel capability.
 

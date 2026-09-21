@@ -371,44 +371,66 @@ These stage times come from the webcam re-check above: 640×480 frames with 4.62
 - **Other tasks:** the diagram shows detection. `SuperResolutionPipeline` runs an `.ignite` container through ignite-xdna's super-resolution pipeline on the NPU, or an `.onnx` model on ONNX Runtime. `PosePipeline` runs a pose container through ignite-xdna's pose pipeline on the NPU, or a head-cut YOLOv8-pose `.onnx` model on ONNX Runtime, and both decode keypoints with ignite-xdna's decoder. `ClassificationPipeline` runs on ONNX Runtime only.
 - **The camera:** a capture thread (`ThreadedCamera`) owns the webcam so sensor I/O never stalls inference. It tries DirectShow, then Media Foundation, abandons a backend that does not open within `--open-timeout`, and skips empty frames. It counts the frames it reads and the ones that repeat the previous frame. q, ESC, closing the window, Ctrl+C and Ctrl+Break all release the camera and the NPU.
 
-## Segmentation and matting hybrid paths: withdrawn pending their evidence
+## Segmentation and matting hybrid paths, against AMD's stack
 
-The source checkout adds BiSeNetV2 `segment` and MODNet Cut `matte`. These are
-hybrid pipelines: the manifests declare CPU network regions as well as NPU
-convolutions. The app returns class masks or alpha images, and records CPU-region,
-dispatch, boundary-transfer and complete-frame times. The canonical transforms
-currently require the ignite-xdna research checkout.
+The source checkout adds BiSeNetV2 `segment` and MODNet Cut `matte`. These are hybrid
+pipelines: the manifests declare CPU network regions as well as NPU convolutions. The
+app returns class masks or alpha images, and records CPU-region, dispatch,
+boundary-transfer and complete-frame times. The canonical transforms require the
+ignite-xdna research checkout.
 
-**These results are withdrawn until their evidence lands.** The logs they rest on were
-never committed to the engine repository, and the engine-side code they describe is not on
-any landed branch, so nothing below can be checked by a reader. Nothing in it was found
-wrong; it is simply unverifiable as published. The numbers are kept here, marked, rather
-than deleted.
+**These two are slower than AMD's stack, and that is the finding.** An earlier version of
+this section was withdrawn because its evidence was never committed; the engine code has
+since landed and the whole sitting was re-run against it on 2026-09-21. Desktop 2, Ryzen 7
+8700G, Phoenix, Ryzen AI 1.7.1, arms alternating, 50 warm-up and 500 timed frames, twice
+per arm, with idle witnesses before and after every run.
 
-Desktop 2 / Ryzen 7 8700G / Phoenix, 2026-09-19, Ryzen AI 1.7.1. Evidence was to live
-in the engine checkout's `results/dense/`. Pin files identify every model, FP32 reference, transform and image.
-All 50 local validation images per model are unlabeled: these results measure
-reference agreement, not segmentation or matting accuracy.
+| model | Ignition, runs 1 / 2 | AMD, runs 1 / 2 | |
+|---|---:|---:|---|
+| BiSeNetV2 `segment` | 43.29 / 43.12 ms | **20.64 / 20.55 ms** | 2.10x slower |
+| MODNet Cut `matte` | 87.24 / 87.47 ms | **31.02 / 30.99 ms** | 2.82x slower |
 
-Both hybrid pipelines reproduce the unoptimized XINT8 CPU reference exactly on
-50/50 images, including every quantized region checked individually on silicon.
-BiSeNetV2 has 33 native convolution regions and 14 CPU regions; MODNet Cut has
-29 and 24. Fresh AMD reports place 402/404 and 502/507 nodes respectively, but
-neither AMD output equals the reference on any of the 50 images. No cause is
-assigned to that discrepancy here.
+The loss is structural rather than unfinished. The CPU regions are real compute, not
+transport: BiSeNetV2 spends 18.66 ms on the NPU and 11.64 ms in its host regions, MODNet
+Cut 21.75 and 31.90 ms. Those sums alone, before any boundary is moved, are already 1.47x
+and 1.73x AMD's entire frame, so making the transfers free would not make either
+competitive. Closing this needs kernels for the operations that forced the host regions.
+There is no badge for these two, because a family that loses on speed and has no labeled
+accuracy has neither half of one.
 
-MODNet's optimized vendor CPU also differs from the unoptimized reference on all
-50 images; optimized ORT 1.30.0 CPU matches it on all 50. Unoptimized outputs and
-preprocessed inputs are identical across environments. Both optimized CPU builds
-are included in the timing comparison, with their correctness reported separately.
-Against corresponding FP32, BiSeNetV2's mean mask agreement is only 59.4641% for
-CPU/Ignition (AMD 15.3373%). MODNet Cut alpha MAD is 0.148592 for CPU/Ignition
-(AMD 0.167185). Cut FP32 itself has alpha MAD 0.038599 against stock MODNet; its
-normalization and head changes predate this work. This is a same-Cut-artifact AMD
-comparison, not a claim about stock MODNet support or labeled accuracy.
+### What they do get right
 
-Each timing run uses the same in-memory image and shared transforms, 50 warm-up
-frames and 500 timed frames. Two alternating runs per backend have idle witnesses
-and host-load checks. CPU-speed acceptance requires at least 10% lower mean in both
-runs, with no worse p95, against both CPU versions. AMD speed is assessed separately.
-Transfer time includes host packing and synchronization, not just device DMA.
+Both pipelines reproduce the unoptimized XINT8 CPU reference **exactly on 50 of 50 images**,
+every quantized region checked individually on silicon, and full-set verification passes
+for both. AMD's stack matches that reference on none of the 50, with a worst absolute
+error of 1.5703125 on BiSeNetV2 logits and 50.0 on MODNet's alpha - the latter a visible
+artifact rather than a rounding difference.
+
+Measured against the corresponding FP32 model rather than the quantized reference, on the
+same 50 images:
+
+| model | Ignition | AMD |
+|---|---:|---:|
+| BiSeNetV2 mean mask pixel agreement | **59.4641%** | 15.3373% |
+| MODNet Cut mean alpha MAD (lower is better) | **0.148592** | 0.167185 |
+
+Both figures reproduce the withdrawn 2026-09-19 sitting to every digit, on different engine
+code, which is the strongest thing that can be said for them short of a labeled run.
+
+**These are agreement measurements, not accuracy.** All 50 local validation images per model
+are unlabeled, so these say how closely each stack computes the model, not what either
+scores on a segmentation or matting benchmark. No labeled comparison has been run. MODNet
+Cut FP32 itself has alpha MAD 0.038599 against stock MODNet; its normalization and head
+changes predate this work, so this is a same-Cut-artifact comparison and not a claim about
+stock MODNet.
+
+MODNet's optimized vendor CPU also differs from the unoptimized reference on all 50 images,
+while optimized ONNX Runtime 1.30.0 CPU matches it on all 50. Unoptimized outputs and
+preprocessed inputs are identical across both environments. Transfer time includes host
+packing and synchronization, not only device DMA.
+
+Each container reaches ONNX Runtime exactly once per declared host region and no more -
+14 calls per frame for BiSeNetV2 and 24 for MODNet Cut, checked through this app's own
+pipeline. Full working, the per-stage split and the engine-side detail are in ignite-xdna's
+`docs/BENCHMARKS.md`, "Dense segmentation and matting against AMD's stack", with evidence
+under its `results/dense/`.
