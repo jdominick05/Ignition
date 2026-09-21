@@ -440,10 +440,20 @@ and open-vocabulary detection (YOLO-World v2, item above).
   closely (BiSeNetV2 mask agreement 59.4641% against 15.3373%), but those are agreement on unlabeled local sets,
   not accuracy. No badge: a family that loses on speed with no labeled accuracy earns neither half of one.
   [measurements](docs/PERFORMANCE.md#segmentation-and-matting-hybrid-paths-against-amds-stack).
-- [ ] Give these two a labelled evaluation. It is the one thing that could make them releasable: AMD's XINT8
-  BiSeNetV2 is separately recorded collapsing on the DPU to 2.44% mIoU, and the FP32 agreement above points the
-  same way, so a labelled run may show an accuracy win large enough to outweigh losing on speed. It needs one
-  Ignition arm on a set that already exists, not a new dataset.
+- [x] **Labelled evaluation: done, and there is no accuracy win.** This entry previously predicted that a
+  labelled run "may show an accuracy win large enough to outweigh losing on speed", on the strength of AMD's
+  2.44% mIoU. **Both halves were wrong.** That 2.44% is mIoU against the FP32 model's own output
+  (`pipelines/bisenetv2/5_eval.py --ref bisenetv2_fp32.onnx`), not a labelled measurement. And the real
+  labelled run, MODNet Cut against COCO person masks on all 2,693 val2017 images with a person, reads
+  Ignition **0.1609** person IoU, AMD **0.1700**, FP32 **0.5030**: Ignition matches the XINT8 CPU reference to
+  every digit, XINT8 costs the model 68% of its IoU, and the stacks differ by noise beside that. Being exact
+  where AMD is not is a correctness property, not an accuracy advantage. BiSeNetV2 cannot be scored on COCO at
+  all - its FP32 predicts 0.00-0.30% person on images that are 84-96% person - so a real number for it needs
+  Cityscapes val, which is not in the research checkout.
+- [ ] **Fix MODNet Cut's XINT8 recipe**, which is where the accuracy actually went: 0.5030 to 0.1609 person
+  IoU is a 68% relative loss, and nothing the engine or the runtime does can recover it. AdaRound,
+  per-channel weight scales or a larger calibration set are the untried levers. This is the only route by
+  which a dense model becomes worth shipping, and it is a quantization problem, not an engine one.
 - [ ] Kernels for the operations that forced the host regions (pooling, resize, normalization, gating, grouped
   convolution, small maps). That, not a boundary protocol, is what would make a dense model fast here.
 

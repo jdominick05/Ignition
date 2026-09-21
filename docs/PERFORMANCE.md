@@ -398,6 +398,34 @@ competitive. Closing this needs kernels for the operations that forced the host 
 There is no badge for these two, because a family that loses on speed and has no labeled
 accuracy has neither half of one.
 
+### Against real labels, there is no accuracy win either
+
+Everything else in this section is **agreement** - with the quantized CPU reference, or with the
+FP32 model. Task accuracy has now been measured for MODNet Cut, against the COCO person masks in
+the research checkout, on all **2,693** val2017 images containing a person. Its alpha is
+thresholded at 0.5 and scored against every annotated person instance:
+
+| arm | person IoU | pixel accuracy |
+|---|---:|---:|
+| FP32 | **0.5030** | 90.22 % |
+| Ignition | 0.1609 | 83.69 % |
+| XINT8 CPU reference | 0.1609 | 83.69 % |
+| AMD | **0.1700** | 82.08 % |
+
+Ignition matches the XINT8 CPU reference to every digit over those 2,693 images - bit-exactness
+confirmed at 54 times the scale of the 50-image check below. **And it buys nothing here.** XINT8
+costs this model 68 % of its person IoU, which dwarfs the difference between the two stacks; AMD is
+higher on IoU and lower on pixel accuracy, so the comparison is mixed and both sides are noise
+beside the quantization loss. Being exact where AMD's stack is not means faithfully reproducing a
+model that quantization has already broken - it is a correctness property, not an accuracy
+advantage, and nothing below should be read as one. The work this points at is MODNet Cut's XINT8
+recipe, not the engine.
+
+Caveat: COCO masks are polygons, so this scores gross person segmentation and says nothing about
+the hair-level detail a matting model exists for. **BiSeNetV2 has no labelled number**, because its
+FP32 model predicts 0.00-0.30 % person on COCO images that are 84-96 % person - a Cityscapes model
+on indoor photographs is out of domain, so scoring it there would measure noise.
+
 ### What they do get right
 
 Both pipelines reproduce the unoptimized XINT8 CPU reference **exactly on 50 of 50 images**,
