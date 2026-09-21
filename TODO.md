@@ -150,8 +150,9 @@ On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.6
   The block cannot be dropped: the C2PSA-ablated `yolo11n_no_c2psa` finds nothing on `bus.jpg`
   (highest class score 0.02 in FP32 and 0.06 in XINT8), and ignite-xdna measured mAP@50-95 0.19 for it on AMD's
   Vitis AI EP against 38.72 for stock FP32 on the CPU (ignite-xdna `docs/BENCHMARKS.md`, its YOLOv11n section).
-- [ ] Measure YOLO11n's COCO accuracy through the container. On `bus.jpg` it finds 6 objects where ONNX Runtime
-  on Ignition's numpy letterbox finds 7, because the two inputs differ by one code in 15% of pixel values.
+- [x] Measure YOLO11n's COCO accuracy through the container. Compiled with `--silu-sigmoid` the attention-core
+  container scores **34.63 mAP@50-95** on all 5,000 COCO val2017 images, against 25.80 without the flag and 25.82
+  for AMD's stack on the same harness (float 38.72). See [YOLO11n with its attention block](docs/PERFORMANCE.md#yolo11n-with-its-attention-block).
 - [ ] YOLOv8n-pose decodes its keypoints in numpy: decode and NMS take 0.36 ms per frame against 0.13–0.14 ms for
   YOLOv8n's native decode. A container from the AdaRound pose model (34.32 OKS mAP@50-95 on AMD's stack) is not
   built or checked.
@@ -330,7 +331,7 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
     - Context recreation between stages costs **29.63 ms** (FATAL); all stages must execute within a single persistent `InferenceSession`.
     - Intra-context NPU dispatch gap between linked segments costs only **6.6 µs**.
     - Decoupled weight sidecars (`.weights`) incur **0.000 ms runtime dispatch penalty** and compress container file sizes by **92.4% on YOLOv8n** (8.84 MB -> 674 KB) and **95.9% on YOLOv8s** (30.76 MB -> 1.26 MB) with bit-exact silicon execution.
-    - Early-exit cascades via `max_segments=1` (cutting at layer 10) deliver a **73% latency reduction** (2.055 ms vs 7.556 ms), ideal for cascading edge detectors to bypass empty video frames.
+    - Early-exit cascades via `max_segments=1` (cutting at layer 10) were recorded as a **73% latency reduction** (2.055 ms vs 7.556 ms). **Withdrawn:** the cut point has no detect heads, so it is a per-segment cost, not a faster detector ([why](docs/PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)).
   - **Engine Capabilities (landed on `split-container-sizing`):**
     - `ignite-compile --split-layer <IDX>` cuts execution into contiguous NPU segments (`insts_0.bin`, `insts_1.bin`) dispatched sequentially.
     - `ignite-compile --decouple-weights` emits slimmed `.ignite` plus companion `.weights` sidecar.
@@ -422,8 +423,8 @@ multiply on the CPU, and the rest is convolutions, like pose), depth (FastDepth,
 semantic segmentation (BiSeNetV2), oriented boxes, and open-vocabulary detection (YOLO-World v2, item above).
 
 **Split and Modular Containers (Decoupled Weights & Subgraph Cascades):**
-- [x] **Decoupled stationary weights (`.weights` sidecar):** `serializer.py` and `ignite-compile --decouple-weights` strips weights from `.ignite` containers, shrinking distribution size by 90.5%–96.8% across the entire YOLOv8 family (0.68–8.67 MB containers) with 0.000 ms steady-state dispatch penalty and bit-exact outputs.
-- [x] **Early-exit cascades (`max_segments=N`):** Multi-segment NPU execution allows early exit on background/empty camera frames across all six YOLOv8 variants (yolov8n, yolov8s, yolov8n-pose, yolov8m, yolov8l, yolov8x) on 8 physical CPU cores, cutting latency uniformly by 72.1%–75.0% (saving up to 92.55 ms/frame on YOLOv8x) and beating AMD's monolithic passes by 2.40× to 5.23×.
+- [x] **Decoupled stationary weights (`.weights` sidecar):** `serializer.py` and `ignite-compile --decouple-weights` strips weights from `.ignite` containers, shrinking distribution size by **92.3%–95.9%** across the entire YOLOv8 family (0.68–8.67 MB containers) with 0.000 ms steady-state dispatch penalty and bit-exact outputs. (An earlier draft read 90.5%–96.8%, wider than any model measured.)
+- [ ] **Early-exit cascades (`max_segments=N`):** multi-segment NPU execution works on all six YOLOv8 variants, but the early-exit *speedup* is **withdrawn**. This entry read "cutting latency uniformly by 72.1%–75.0% ... and beating AMD's monolithic passes by 2.40x to 5.23x"; both compared a partial dispatch against AMD's complete pass, and a partial dispatch has no detect heads, so it returns no detections at all ([why](docs/PERFORMANCE.md#yolov8-family-split-containers-against-amds-stack)). A real early exit needs a decision rule on the backbone's feature map; neither that rule nor its cost nor its accuracy exists yet.
 - [x] **Zero-copy stage chaining (`InferenceSession.compose`):** Reuses a single shared DDR workspace (`bo_ws`) across modular subgraphs without memory bloat or host bus transfers.
 
 **Not pursued:** general transformers on XDNA1. Every CPU island in the middle of a block pays the dispatch floor.
