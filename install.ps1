@@ -94,8 +94,16 @@ param(
     $DriverUrl = 'https://download.amd.com/opendownload/RyzenAI/Driver/NPU_RAI_376_WHQL.zip'
     $DriverSha256 = 'AA836CBFCAD5D0782C79B58F197AA50624AF37E7CB8311C5F94D85B0DC3CCAAD'
     $DriverVersion = [version]'32.0.20101.3760'
-    $MlirAie = @('mlir_aie==1.4.2', 'https://github.com/Xilinx/mlir-aie/releases/expanded_assets/v1.4.2')
-    $LlvmAie = @('llvm-aie==22.0.0.2026090201+a36c62b9', 'https://github.com/Xilinx/llvm-aie/releases/expanded_assets/nightly')
+    # Installed by DIRECT wheel URL, not through a --find-links page. The version is pinned by the
+    # filename, so nothing is lost, and two things are gained. An asset that moves now fails with an
+    # HTTP error naming it, where a --find-links page reports any failed fetch as "Could not find a
+    # version that satisfies the requirement (from versions: none)" - which reads as "this wheel does
+    # not exist". And a filtering proxy that mangles HTML no longer breaks the install: reported from
+    # a school VPN on 2026-09-21, where the 649 KB llvm-aie listing failed three times with backoff
+    # while a 400 MB wheel downloaded straight through, because octet-stream passed and HTML did not.
+    # cp313 is correct because New-Venv builds this environment at Python 3.13; llvm-aie is py3-none.
+    $MlirAie = @('mlir_aie==1.4.2', 'https://github.com/Xilinx/mlir-aie/releases/download/v1.4.2/mlir_aie-1.4.2-cp313-cp313-win_amd64.whl')
+    $LlvmAie = @('llvm-aie==22.0.0.2026090201+a36c62b9', 'https://github.com/Xilinx/llvm-aie/releases/download/nightly/llvm_aie-22.0.0.2026090201%2Ba36c62b9-py3-none-win_amd64.whl')
     $Eudsl = @('eudsl-python-extras==0.1.0.20260801.905+68a0d7a', 'https://llvm.github.io/eudsl')
     # Export (Ultralytics), quantization (AMD Quark's XINT8) and the Hugging Face CLI. Quark 0.11.2 only warns when it
     # cannot build its C++ custom ops, which XINT8 does not use; Quark 0.12 stops at import without a C++ compiler.
@@ -424,8 +432,8 @@ param(
     Invoke-Checked $venvPython ($pip + @('--upgrade', 'pip')) 'Upgrading pip in the NPU environment' 3
     Invoke-Checked $venvPython ($pip + @('aiofiles', 'rich', 'ml_dtypes>=0.5.4', 'cloudpickle', 'numpy>=2.5.1,<3.0')) "Installing mlir-aie's Python requirements" 3
     Invoke-Checked $venvPython ($pip + @($Eudsl[0], '-f', $Eudsl[1], '--config-settings=EUDSL_PYTHON_EXTRAS_HOST_PACKAGE_PREFIX=aie')) 'Installing eudsl-python-extras' 3
-    Invoke-Checked $venvPython ($pip + @($MlirAie[0], '-f', $MlirAie[1])) 'Installing mlir-aie' 3
-    Invoke-Checked $venvPython ($pip + @($LlvmAie[0], '-f', $LlvmAie[1])) 'Installing llvm-aie (Peano)' 3
+    Invoke-Checked $venvPython ($pip + @($MlirAie[1])) 'Installing mlir-aie' 3
+    Invoke-Checked $venvPython ($pip + @($LlvmAie[1])) 'Installing llvm-aie (Peano)' 3
     Repair-LlvmAie $venv
     Invoke-Checked $venvPython ($pip + @('-e', $igniteXdna, '-e', $ignition)) 'Installing ignite-xdna and Ignition' 3
 
