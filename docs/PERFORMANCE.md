@@ -402,9 +402,12 @@ accuracy has neither half of one.
 
 Both pipelines reproduce the unoptimized XINT8 CPU reference **exactly on 50 of 50 images**,
 every quantized region checked individually on silicon, and full-set verification passes
-for both. AMD's stack matches that reference on none of the 50, with a worst absolute
-error of 1.5703125 on BiSeNetV2 logits and 50.0 on MODNet's alpha - the latter a visible
-artifact rather than a rounding difference.
+for both. AMD's stack matches that reference on none of the 50. Its largest single-element
+difference across the set is 1.5703125 for BiSeNetV2 and 50.0 for MODNet Cut, both on the
+**raw network output** - BiSeNetV2's logits and MODNet Cut's unscaled float32 tensor - with
+per-image mean absolute differences of about 0.25 and 1.2 to 3.3 in those same units. Those
+numbers are not alpha or mask values and say nothing on their own about what a viewer would
+see; the user-facing consequence is the postprocessed comparison below.
 
 Measured against the corresponding FP32 model rather than the quantized reference, on the
 same 50 images:
@@ -415,7 +418,10 @@ same 50 images:
 | MODNet Cut mean alpha MAD (lower is better) | **0.148592** | 0.167185 |
 
 Both figures reproduce the withdrawn 2026-09-19 sitting to every digit, on different engine
-code, which is the strongest thing that can be said for them short of a labeled run.
+code, which is the strongest thing that can be said for them short of a labeled run. The
+BiSeNetV2 mask transform changed between the two sittings, so the agreement matching to four
+decimals is also evidence that what changed did not touch the postprocess these figures run
+through.
 
 **These are agreement measurements, not accuracy.** All 50 local validation images per model
 are unlabeled, so these say how closely each stack computes the model, not what either
