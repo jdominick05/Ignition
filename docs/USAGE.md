@@ -51,6 +51,41 @@ pip install -e Ignition
 cd Ignition
 ```
 
+## If the installer stops on a restricted network
+
+`install.ps1` downloads about 580 MB of toolchain wheels. On a filtered or throttled
+connection, such as a school or corporate network or a VPN through one, that is where it
+stops, and the error names the command that failed.
+
+**`Could not find a version that satisfies the requirement ... (from versions: none)`** does
+not mean the wheel is missing. It means pip's fetch of the package listing returned nothing
+usable, and pip reports a failed fetch the same way it reports a genuinely absent package.
+Reported from a school VPN on 2026-09-21: a 400 MB wheel downloaded normally while the
+649 KB HTML listing needed to find it failed three times, because the filter passed
+`application/octet-stream` and interfered with HTML from the same host. Since then the two
+large packages install from direct wheel URLs, so the listing is no longer on the path.
+
+If an install still stops on a download, finish it by hand and re-run. Each package installs
+independently, and re-running skips whatever is already satisfied:
+
+```powershell
+& "$env:LOCALAPPDATA\Ignition\venv\Scripts\python.exe" -m pip install "https://github.com/Xilinx/mlir-aie/releases/download/v1.4.2/mlir_aie-1.4.2-cp313-cp313-win_amd64.whl"
+& "$env:LOCALAPPDATA\Ignition\venv\Scripts\python.exe" -m pip install "https://github.com/Xilinx/llvm-aie/releases/download/nightly/llvm_aie-22.0.0.2026090201%2Ba36c62b9-py3-none-win_amd64.whl"
+```
+
+Both are plain file downloads, so they also work from a machine with a better connection:
+save the two wheels, copy them across, and `pip install` each by path. The versions must
+match the ones above, because the installer pins them.
+
+To capture a transcript worth sending, wrap the run. The step headers are written to
+PowerShell's information stream, so a plain `>` redirect drops them:
+
+```powershell
+Start-Transcript -Path "$env:USERPROFILE\Desktop\ignition-install.log" -Force
+irm https://raw.githubusercontent.com/jdominick05/Ignition/main/install.ps1 | iex
+Stop-Transcript
+```
+
 ### 1. See it work
 
 ```bash
