@@ -176,6 +176,12 @@ param(
                 throw "Python 3.$Minor was not found after winget ran. Install 64-bit Python 3.$Minor from python.org, then run this again with $Option <path to python.exe>."
             }
         }
+        # One path, or fail here rather than three steps later. This returned an array once, when a bare
+        # winget call left its console text on this function's output stream, and the damage only showed
+        # up at step 7 as an unrunnable command built from that text.
+        if (@($found).Count -ne 1) {
+            throw "Internal error: the Python 3.$Minor search returned $(@($found).Count) values instead of one path. Please report this with the output above."
+        }
         Write-Note "using $found"
         return $found
     }
@@ -207,7 +213,12 @@ param(
             throw "winget is not available to install $Id. Install App Installer from the Microsoft Store, or install $Id yourself, then run this again."
         }
         Write-Note "installing $Id with winget"
-        & $winget.Source install --id $Id --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @Extra
+        # Out-Host, never bare. A bare native call writes to this function's OUTPUT stream, and a
+        # function's uncaptured output is its return value: called from Get-Python, winget's console
+        # text joined $found in the returned array, [string] flattened the array into one line, and
+        # step 7 then tried to run "Found Python 3.13 ... Successfully installed C:\...\python.exe"
+        # as a command. It only bit on a machine where winget actually had to install something.
+        & $winget.Source install --id $Id --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity @Extra | Out-Host
         # winget also exits non-zero when the package is already there; the caller looks for the program again.
         Update-ProcessPath
     }
@@ -215,7 +226,9 @@ param(
     function Invoke-Checked([string]$Exe, [string[]]$Arguments, [string]$What) {
         # Assert-Exit reports only an exit code, which on a failed install says nothing about which of the
         # several commands in a step failed. This names the step and prints the command so it can be pasted.
-        & $Exe @Arguments
+        # Out-Host for the same reason Install-WithWinget uses it: New-Venv calls this and then returns a
+        # path, so anything left on the output stream would be returned alongside it.
+        & $Exe @Arguments | Out-Host
         if ($LASTEXITCODE -ne 0) {
             $shown = @()
             foreach ($argument in $Arguments) {
@@ -238,11 +251,11 @@ param(
     function Sync-Repository([string]$Git, [string]$Url, [string]$Branch, [string]$Directory) {
         if (Test-Path (Join-Path $Directory '.git')) {
             Write-Note "updating $Directory"
-            & $Git -C $Directory fetch origin $Branch
+            & $Git -C $Directory fetch origin $Branch | Out-Host
             Assert-Exit "git fetch in $Directory"
-            & $Git -C $Directory checkout $Branch
+            & $Git -C $Directory checkout $Branch | Out-Host
             Assert-Exit "git checkout $Branch in $Directory"
-            & $Git -C $Directory merge --ff-only "origin/$Branch"
+            & $Git -C $Directory merge --ff-only "origin/$Branch" | Out-Host
             Assert-Exit "Fast-forwarding $Directory (local changes or local commits stop an update)"
         }
         elseif (Test-Path $Directory) {
@@ -250,7 +263,7 @@ param(
         }
         else {
             Write-Note "cloning $Url"
-            & $Git clone --branch $Branch $Url $Directory
+            & $Git clone --branch $Branch $Url $Directory | Out-Host
             Assert-Exit "git clone $Url"
         }
         $head = & $Git -C $Directory log -1 '--format=%h %s'
@@ -285,7 +298,7 @@ param(
             }
             $crt1 = Join-Path $toolchain.FullName 'crt1.o'
             if (Test-Path $crt1) {
-                & $objcopy --remove-section=.deplibs $crt1
+                & $objcopy --remove-section=.deplibs $crt1 | Out-Host
                 Assert-Exit "Preparing $crt1"
             }
         }
