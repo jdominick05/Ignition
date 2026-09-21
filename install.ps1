@@ -223,20 +223,34 @@ param(
         Update-ProcessPath
     }
 
-    function Invoke-Checked([string]$Exe, [string[]]$Arguments, [string]$What) {
+    function Invoke-Checked([string]$Exe, [string[]]$Arguments, [string]$What, [int]$Attempts = 1) {
         # Assert-Exit reports only an exit code, which on a failed install says nothing about which of the
         # several commands in a step failed. This names the step and prints the command so it can be pasted.
         # Out-Host for the same reason Install-WithWinget uses it: New-Venv calls this and then returns a
         # path, so anything left on the output stream would be returned alongside it.
-        & $Exe @Arguments | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-            $shown = @()
-            foreach ($argument in $Arguments) {
-                if ("$argument" -match '\s') { $shown += ('"' + $argument + '"') } else { $shown += "$argument" }
+        #
+        # Attempts > 1 is for the package installs. They fetch from GitHub release asset pages, which pip
+        # reads as a --find-links page: one request, no retry of its own, and an empty or truncated response
+        # is reported as "no matching distribution" rather than as a failed fetch. mlir_aie is a 180 MB
+        # wheel, so there is a long window in which one flaky link fails the whole install. A deterministic
+        # failure still fails every attempt and still throws, so this slows a real error down rather than
+        # hiding it.
+        for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+            & $Exe @Arguments | Out-Host
+            if ($LASTEXITCODE -eq 0) { return }
+            if ($attempt -lt $Attempts) {
+                Write-Warn ("{0} failed with exit code {1}; retrying, attempt {2} of {3}" -f $What, $LASTEXITCODE, ($attempt + 1), $Attempts)
+                Start-Sleep -Seconds (5 * $attempt)
             }
-            $line = '"' + $Exe + '" ' + ($shown -join ' ')
-            throw ("{0} failed with exit code {1}. The command was: {2}" -f $What, $LASTEXITCODE, $line)
         }
+        $shown = @()
+        foreach ($argument in $Arguments) {
+            if ("$argument" -match '\s') { $shown += ('"' + $argument + '"') } else { $shown += "$argument" }
+        }
+        $line = '"' + $Exe + '" ' + ($shown -join ' ')
+        $tail = ''
+        if ($Attempts -gt 1) { $tail = " after $Attempts attempts" }
+        throw ("{0} failed with exit code {1}{2}. The command was: {3}" -f $What, $LASTEXITCODE, $tail, $line)
     }
 
     function Test-XrtSdk {
@@ -407,20 +421,20 @@ param(
     Write-Step 'Python 3.13 environment and NPU compiler toolchain'
     $venv = Join-Path $InstallRoot 'venv'
     $venvPython = New-Venv $pythonExe $venv '13'
-    Invoke-Checked $venvPython ($pip + @('--upgrade', 'pip')) 'Upgrading pip in the NPU environment'
-    Invoke-Checked $venvPython ($pip + @('aiofiles', 'rich', 'ml_dtypes>=0.5.4', 'cloudpickle', 'numpy>=2.5.1,<3.0')) "Installing mlir-aie's Python requirements"
-    Invoke-Checked $venvPython ($pip + @($Eudsl[0], '-f', $Eudsl[1], '--config-settings=EUDSL_PYTHON_EXTRAS_HOST_PACKAGE_PREFIX=aie')) 'Installing eudsl-python-extras'
-    Invoke-Checked $venvPython ($pip + @($MlirAie[0], '-f', $MlirAie[1])) 'Installing mlir-aie'
-    Invoke-Checked $venvPython ($pip + @($LlvmAie[0], '-f', $LlvmAie[1])) 'Installing llvm-aie (Peano)'
+    Invoke-Checked $venvPython ($pip + @('--upgrade', 'pip')) 'Upgrading pip in the NPU environment' 3
+    Invoke-Checked $venvPython ($pip + @('aiofiles', 'rich', 'ml_dtypes>=0.5.4', 'cloudpickle', 'numpy>=2.5.1,<3.0')) "Installing mlir-aie's Python requirements" 3
+    Invoke-Checked $venvPython ($pip + @($Eudsl[0], '-f', $Eudsl[1], '--config-settings=EUDSL_PYTHON_EXTRAS_HOST_PACKAGE_PREFIX=aie')) 'Installing eudsl-python-extras' 3
+    Invoke-Checked $venvPython ($pip + @($MlirAie[0], '-f', $MlirAie[1])) 'Installing mlir-aie' 3
+    Invoke-Checked $venvPython ($pip + @($LlvmAie[0], '-f', $LlvmAie[1])) 'Installing llvm-aie (Peano)' 3
     Repair-LlvmAie $venv
-    Invoke-Checked $venvPython ($pip + @('-e', $igniteXdna, '-e', $ignition)) 'Installing ignite-xdna and Ignition'
+    Invoke-Checked $venvPython ($pip + @('-e', $igniteXdna, '-e', $ignition)) 'Installing ignite-xdna and Ignition' 3
 
     $modelVenv = Join-Path $InstallRoot 'venv-models'
     if (-not $SkipModelTools) {
         Write-Step 'Python 3.12 environment for exporting and quantizing models'
         $modelPythonExe = New-Venv $modelBase $modelVenv '12'
-        Invoke-Checked $modelPythonExe ($pip + @('--upgrade', 'pip')) 'Upgrading pip in the model environment'
-        Invoke-Checked $modelPythonExe ($pip + $ModelTools) 'Installing AMD Quark, Ultralytics and the Hugging Face CLI'
+        Invoke-Checked $modelPythonExe ($pip + @('--upgrade', 'pip')) 'Upgrading pip in the model environment' 3
+        Invoke-Checked $modelPythonExe ($pip + $ModelTools) 'Installing AMD Quark, Ultralytics and the Hugging Face CLI' 3
     }
 
     Write-Step 'Session setup scripts'
