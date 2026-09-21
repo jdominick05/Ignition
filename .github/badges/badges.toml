@@ -65,6 +65,15 @@ replace = "$1 / $2 ms, $3 mAP vs AMD $4 / $5 ms, $6 mAP"
 color = "brightgreen"
 [[badge]]
 row = 2
+alt = "YOLO26n latency and COCO box accuracy against AMD's stack, both runs"
+label = "YOLO26n"
+file = "docs/PERFORMANCE.md"
+section = "YOLO26n with its DFL-free head"
+search = '''## YOLO26n with its DFL-free head(?s:.*?)\*\*Against AMD's stack: ([0-9.]+) / ([0-9.]+) ms and ([0-9.]+) (?:OKS )?mAP@50-95, against ([0-9.]+) / ([0-9.]+) ms and ([0-9.]+)\.\*\*'''
+replace = "$1 / $2 ms, $3 mAP vs AMD $4 / $5 ms, $6 mAP"
+color = "brightgreen"
+[[badge]]
+row = 2
 alt = "YOLOv8n-pose latency and COCO keypoint accuracy against AMD's stack, both runs"
 label = "YOLOv8n-pose"
 file = "docs/PERFORMANCE.md"

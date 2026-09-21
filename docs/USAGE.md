@@ -18,7 +18,7 @@ worth its hours, and how to validate the result before quoting a number.
 | **NPU driver and XRT** | ✅ Verified | NPU driver 32.0.20101.3760, firmware 1.5.5.391, XRT 2.21.0 |
 | **Python** | ✅ 3.10–3.13 (CPU), 3.13 (NPU) | The CPU path installs and runs on 3.10, 3.11, 3.12 and 3.13. The NPU path needs the Python the XRT SDK's `pyxrt` was built for, 3.13 with XRT 2.21.0; on 3.12 it stops at `DLL load failed while importing pyxrt` |
 | **YOLOv8n detection on the NPU** | ✅ Verified | 640×640 input, AMD Quark XINT8, compiled to `build/yolov8n_full.ignite` by ignite-xdna with `--silu-sigmoid` |
-| **Other models on the NPU** | ✅ Verified | YOLOv8s detection, SESR M7 super-resolution and YOLOv8n-pose pose estimation run on the NPU through `live_ignition.py`, and so does YOLO11n detection with its attention matrix multiplies and softmax on ONNX Runtime's CPU provider, from a checkout or from the v0.3.3 wheels ([how](#5-run-other-models)) |
+| **Other models on the NPU** | ✅ Verified | YOLOv8s detection, SESR M7 super-resolution and YOLOv8n-pose pose estimation run on the NPU through `live_ignition.py`, and so does YOLO11n detection with its attention matrix multiplies and softmax on ONNX Runtime's CPU provider, from a checkout or from the v0.3.3 wheels. YOLO26n joins them in v0.3.4 and needs ignite-xdna 0.3.2 or newer ([how](#5-run-other-models)) |
 | **Other ONNX models** | ✅ CPU only | ONNX Runtime's CPU execution provider; `live_ignition.py` detects, classifies, estimates poses or upscales according to the model's outputs |
 | **Webcams** | ✅ Verified | USB webcams through DirectShow, then Media Foundation; tested at 640×480 |
 | **Video files and images** | ✅ Verified | Anything OpenCV opens, letterboxed to 640×640; tested with 640×480 and 810×1080 frames |
@@ -136,17 +136,18 @@ On the test machine, the 100-frame benchmark sustained 128.78 frames per second 
 
 `live_ignition.py` works out what a model computes from the container's manifest or the ONNX model's outputs, and `--task` overrides it:
 
-- **Detection:** YOLO models (YOLOv8n, YOLOv8s, YOLO11n), drawn as boxes.
+- **Detection:** YOLO models (YOLOv8n, YOLOv8s, YOLO11n, YOLO26n), drawn as boxes. YOLO26 dropped DFL, so its box head carries four channels instead of 4x16; the container declares that as `reg_max` and the decode follows it, so nothing in Ignition knows a model by name.
 - **Classification:** one `(1, N)` output, such as ResNet50, shown as the top 5. Preprocessing follows a timm `preprocess_config.json` beside the model, or ImageNet defaults. It runs on the CPU only. The engine can place a whole classifier on the NPU (ignite-xdna `3f940b4`: 28/28 layers exact on silicon, its pooling carried by one host segment — [measurements](PERFORMANCE.md#classification-head-against-amds-stack)), but that holds for one model family at 640, not for the zoo, and `live_ignition.py` does not yet accept a `.ignite` classify container.
 - **Super-resolution:** one image output a whole multiple of the input size, such as SESR M7 (256×256 to 512×512), shown as the upscaled image.
 - **Pose estimation:** a head-cut YOLOv8-pose model (nine outputs, three with 51 keypoint channels), drawn as each person's box and 17-keypoint skeleton.
 
-YOLOv8s, SESR M7, YOLO11n and YOLOv8n-pose run on the NPU with ignite-xdna 0.3.1, which the `npu` extra requires, or its `main`. An older ignite-xdna without the super-resolution or pose pipeline stops a SESR or pose model at load with an `ImportError` that says so, and a pose `.onnx` model on the CPU needs the pose pipeline too, for its decode. Build the containers in the ignite-xdna checkout with the toolchain YOLOv8n needs (ignite-xdna's [model zoo notes](https://github.com/jdominick05/ignite-xdna/blob/main/docs/MODEL_ZOO_BENCHMARKS.md) record how these were built and checked):
+YOLOv8s, SESR M7, YOLO11n, YOLO26n and YOLOv8n-pose run on the NPU with ignite-xdna 0.3.2, which the `npu` extra requires, or its `main`. YOLO26 needs 0.3.2 specifically: `reg_max` became a container property after 0.3.1 was cut, so an older runtime cannot decode its head. An older ignite-xdna without the super-resolution or pose pipeline stops a SESR or pose model at load with an `ImportError` that says so, and a pose `.onnx` model on the CPU needs the pose pipeline too, for its decode. Build the containers in the ignite-xdna checkout with the toolchain YOLOv8n needs (ignite-xdna's [model zoo notes](https://github.com/jdominick05/ignite-xdna/blob/main/docs/MODEL_ZOO_BENCHMARKS.md) record how these were built and checked):
 
 ```bash
 ignite-compile --engine graph --input models/yolov8s_cut_xint8.onnx --output build/yolov8s.ignite --silu-sigmoid
 ignite-compile --engine graph --input models/sesr_m7_xint8.onnx --output build/sesr_m7.ignite
 ignite-compile --engine graph --input models/yolo11n_cut_xint8.onnx --output build/yolo11n.ignite --host-region "/model.10/m/m.0/attn/qkv/conv/Conv=/model.10/m/m.0/attn/Reshape_1" --silu-sigmoid
+ignite-compile --engine graph --input models/yolo26n_cut_xint8.onnx --output build/yolo26n.ignite --host-region "/model.10/m/m.0/attn/qkv/conv/Conv=/model.10/m/m.0/attn/Reshape_1" --host-region "/model.22/m.0/m.0.1/attn/qkv/conv/Conv=/model.22/m.0/m.0.1/attn/Reshape_1" --silu-sigmoid
 ignite-compile --engine graph --input models/yolov8n-pose_cut_xint8.onnx --output build/yolov8n_pose.ignite --silu-sigmoid
 ```
 
@@ -206,13 +207,13 @@ with ignition.compile("build/modnet_cut_dense.ignite", pipeline="matte") as pipe
 Segmentation supplies `result.mask` (uint8 class indices) instead of `alpha`.
 Visualization overlays the class palette or composites the alpha over black.
 These recipes contain explicit CPU network regions and report `xdna1-hybrid`.
-The canonical family transforms require the ignite-xdna source checkout. See the
+**Neither runs from a released wheel today.** The `.ignite` path needs `ignite_xdna.runtime.dense_session`, which no released ignite-xdna provides because the hybrid engine path has not landed; Ignition refuses with a message saying so rather than the bare `ModuleNotFoundError` it raised before 0.3.4. The `.onnx` CPU path additionally needs the ignite-xdna source checkout, whose `npu/` transforms are not packaged in the wheel. Their measurements are withdrawn pending evidence. See the
 [measurements](PERFORMANCE.md#segmentation-and-matting-hybrid-paths-withdrawn-pending-their-evidence) and
 [model-building rules](QUANTIZATION-GUIDE.md#explicit-segmentation-and-matting-regions).
 
 ## Limitations
 
-- **Model coverage is explicit.** The released packages run YOLOv8n, YOLOv8s, SESR M7, YOLOv8n-pose and YOLO11n on the NPU. The source checkout additionally supports the hybrid segmentation and matting recipes above. ResNet50 classification runs on the CPU in this app: the engine has a `.ignite` lowering that puts a whole classifier on the device for models it accepts, and one of fifteen XINT8 classifiers reaches a schedule at all ([measurements](PERFORMANCE.md#classification-head-against-amds-stack)); none of it is wired into `live_ignition.py` yet, and other ONNX models run on the CPU.
+- **Model coverage is explicit.** The released packages run YOLOv8n, YOLOv8s, SESR M7, YOLOv8n-pose, YOLO11n and YOLO26n on the NPU. The hybrid segmentation and matting recipes above run from no released wheel yet, and Ignition refuses them with a message naming what is missing. ResNet50 classification runs on the CPU in this app: the engine has a `.ignite` lowering that puts a whole classifier on the device for models it accepts, and one of fifteen XINT8 classifiers reaches a schedule at all ([measurements](PERFORMANCE.md#classification-head-against-amds-stack)); none of it is wired into `live_ignition.py` yet, and other ONNX models run on the CPU.
 - **A build step.** The `.ignite` container is built from AMD Quark's quantized model with ignite-xdna and the mlir-aie toolchain; it is not a pip install.
 - **AMD's stack is faster on some models.** In the default power mode, on YOLOv8s (16.75–16.79 against 18.18–18.21 ms with `--silu-sigmoid`, 17.80–17.87 ms without) and SESR M7 (4.35 against 4.78 ms) its NPU stage outruns the engine, which moves activations and weights to the NPU every frame ([measurements](PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)). On YOLOv8s this is a known limitation: no runtime change tried in ignite-xdna closes it.
 - **Narrow hardware support.** Only Phoenix has been verified. Hawk Point is untested, and Strix-class NPUs and Linux are not supported.

@@ -123,6 +123,14 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
 
 ### 1. Model zoo in Ignition
 
+- [x] **YOLO26n (v0.3.4).** The newest YOLO family, and the one AMD's stack handles worst: its Vitis AI EP
+  places 12 of 1,526 nodes where the engine runs 107 of 107 layers. 11.03 / 11.01 ms against AMD's
+  37.44 / 37.67 (**3.41x**) and 32.55 mAP@50-95 against 23.64, in one sitting
+  ([measurements](docs/PERFORMANCE.md#yolo26n-with-its-dfl-free-head)). Ignition needed no code change:
+  YOLO26 dropped DFL and the container declares reg_max, which the decode follows. Needs ignite-xdna
+  0.3.2, since reg_max became a container property after 0.3.1 was cut. Its own float export scores
+  39.66, so the win is against AMD on identical quantized weights, not against float.
+
 ignite-xdna compiles YOLOv8s and SESR M7 to `.ignite` and runs them on Device 0 (merge `6bd2718`), and Ignition's
 `live_ignition.py` serves them (`--task`, `--json`). The table below is the pre-merge record; current figures are in the
 [performance notes](docs/PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack).

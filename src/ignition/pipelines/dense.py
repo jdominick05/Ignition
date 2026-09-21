@@ -51,7 +51,18 @@ class DensePipeline:
         self.native = self.session = None
         self._closed = False
         if self.is_native:
-            from ignite_xdna.runtime.dense_session import DenseTensorSession
+            try:
+                from ignite_xdna.runtime.dense_session import DenseTensorSession
+            except ImportError as ex:
+                # The hybrid engine path for these two tasks is not on any released ignite-xdna, so
+                # this used to surface as a bare ModuleNotFoundError from a --task the CLI advertises.
+                raise RuntimeError(
+                    f"--task {task} on an .ignite container needs ignite_xdna.runtime.dense_session, "
+                    "which no released ignite-xdna provides: the hybrid segmentation and matting engine "
+                    "path has not landed yet. The .onnx CPU path for these two tasks additionally needs "
+                    "the ignite-xdna research checkout, whose npu/ transforms are not packaged in the "
+                    "wheel. Both are tracked for a later release."
+                ) from ex
             self.native = DenseTensorSession(self.model_path,device_index=device_id)
             self._finalizer = weakref.finalize(self,_release_native,self.native)
             shape = self.native.ignite_manifest['input_shape']

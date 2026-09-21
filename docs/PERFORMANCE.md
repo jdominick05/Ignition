@@ -184,6 +184,34 @@ The earlier 2026-09-17 sitting of this section read 10.46 / 10.50 ms for the att
 - **Why 6 objects against 7:** Ignition's boxes equal ONNX Runtime's CPU decode of the same NPU input (IoU 1.0). The runs differ in their input. AMD's stack uses Ignition's numpy letterbox, and Ignition's NPU path uses its native ingress. Both place the image identically, but 15% of the pixel codes differ by one. On the numpy letterbox, ONNX Runtime's CPU provider finds the classes AMD's stack reported: five people, a bus and a handbag. On the native input it finds four people, a bus and a train. No accuracy was measured.
 - **Memory:** resident memory was 200.9 MB in both runs with the attention core on the CPU and 202.2 and 202.4 MB with the whole block, flat over each run, against 343.7 and 342.6 MB for AMD's stack.
 
+## YOLO26n with its DFL-free head
+
+**Against AMD's stack: 11.03 / 11.01 ms and 32.55 mAP@50-95, against 37.44 / 37.67 ms and 23.64.**
+
+Measured on 2026-09-21 (UTC) in one sitting with Ignition in its default power mode, ignite-xdna at `c16daca` and Ignition at `c7efbb3`. The image was `examples/assets/bus.jpg`, with 50 warm-up and 500 timed frames per run. Runs alternated AMD's stack, the container compiled with `--silu-sigmoid`, and the same container without it. `xrt-smi` reported no hardware contexts before every run and at the end. AMD's arm ran ignite-xdna's `tools/amd_vitisai_yolo.py` with `--decoder npu.yolo26_decode:decode_heads`: YOLO26 dropped DFL, so its box head carries four channels rather than 4x16, and the YOLOv8-shaped decode would have placed every box wrongly without raising.
+
+**YOLO26 is the newest YOLO family and the one AMD's stack handles worst.** Its two attention blocks stop the Vitis AI EP, which places 12 of the model's 1,526 graph nodes on the NPU; the engine runs 107 of 107 layers with the two attention cores on the host by declaration. That is why the gap here is wider than on any other model Ignition runs.
+
+| Run | Stack | Mean | 99th pct | Where the time goes | Objects |
+|---|---|---:|---:|---|---:|
+| 1 | AMD Ryzen AI Software 1.7.1 (ONNX Runtime + Vitis AI EP) | 37.44 ms | 41.40 ms | letterbox 1.92 ms, `session.run` 34.26 ms, decode+NMS 1.25 ms | 6 |
+| 2 | Ignition, sigmoid epilogue | **11.03 ms** | 11.91 ms | preprocess 0.20 ms, NPU + host forward 10.73 ms, decode+NMS 0.09 ms | 5 |
+| 3 | Ignition, no epilogue | 10.73 ms | 11.65 ms | preprocess 0.20 ms, NPU + host forward 10.42 ms, decode+NMS 0.10 ms | 6 |
+| 4 | AMD Ryzen AI Software 1.7.1 (ONNX Runtime + Vitis AI EP) | 37.67 ms | 41.97 ms | letterbox 1.91 ms, `session.run` 34.51 ms, decode+NMS 1.26 ms | 6 |
+| 5 | Ignition, sigmoid epilogue | **11.01 ms** | 11.93 ms | preprocess 0.20 ms, NPU + host forward 10.71 ms, decode+NMS 0.09 ms | 5 |
+| 6 | Ignition, no epilogue | 10.71 ms | 11.74 ms | preprocess 0.20 ms, NPU + host forward 10.41 ms, decode+NMS 0.09 ms | 6 |
+
+- **3.41x AMD's stack on the means**, 26.5 ms less per frame. The forward stage splits into NPU dispatch 9.15 ms, the two host attention cores 1.37 ms and readback 0.21 ms.
+- **The epilogue costs 0.30 ms**, 2.8 % of the frame, and buys 8.81 mAP@50-95. ignite-xdna's container benchmark measured the same cost independently as 0.26 ms.
+- **Ignition needed no change to run this model.** It reads `reg_max` from the container manifest, which the compiler derives from the box head's channel count, so nothing in the app knows a model by name. Boxes came from the NPU detect heads on 500/500 timed frames in all four engine runs.
+- **Two ONNX Runtime calls per frame**, one for each attention core, counted in a harness. YOLOv8n and YOLOv8n-pose make none and YOLO11n makes one.
+- **Five objects, not six.** The epilogue container reports 5.00 per frame and the other two 6.00, on every timed frame. The sixth is a quantization artifact of the HardSigmoid form, and the float model does not produce it either, so 5 is the correct count.
+- **Memory:** 201 MB resident against AMD's 363 MB, flat over each run.
+
+**Accuracy, and the caveat that travels with it.** 32.55 mAP@50-95 against AMD's 23.64 covers all 5,000 COCO val2017 images at conf 0.001, IoU 0.7, max 300 detections, and comes from ignite-xdna's `pipelines/yolov8n/5_eval_map.py`, not from the sitting above. Without the epilogue the container scores 23.74, within 0.10 of AMD's 23.64 on the same quantized weights, which is what two stacks running a layer-exact container should read. **The model's own float export scores 39.66 on that harness**, so 32.55 is 7.11 below float: the win is against AMD's stack on identical weights, not against the float model. The loss splits into the activation form and int8 arithmetic, measured separately at 10.11 and 5.81 points.
+
+**Energy was not measured** for this model on either stack.
+
 ## YOLOv8n-pose on the NPU
 
 **Against AMD's stack: 9.28 / 9.35 ms and 44.16 OKS mAP@50-95, against 12.07 / 11.97 ms and 32.64.**
