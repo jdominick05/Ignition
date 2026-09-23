@@ -1,3 +1,4 @@
+# Copyright (C) 2026 The Ignition contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Dense model tasks using the study's canonical family transforms.
 

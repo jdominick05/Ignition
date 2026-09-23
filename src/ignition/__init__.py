@@ -1,4 +1,4 @@
-# Copyright (C) 2026 Advanced Micro Devices, Inc.
+# Copyright (C) 2026 The Ignition contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """
 Ignition: High-performance ergonomic inference engine for AMD Ryzen AI XDNA1 NPUs.

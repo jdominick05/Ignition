@@ -318,8 +318,8 @@ until you reach silicon:
 |---|---|---|
 | **INT8 (XINT8)** | The default path, 256 MACs/cycle | Everything, unless it collapses |
 | **INT16 activations** | Native, but 64 MACs/cycle; measured at **0.93x int8** end to end (0.68-1.04x) | Models that collapse at 8 bits: +48.2 dB SQNR. The vendor runtime path is deadlocked — opset 17 forces quantization nodes it rejects, opset 21 its parser rejects |
-| **BF16** | Real kernels; GEMM is the project's best kernel result (1.33x over CPU at large shapes), standalone activation kernels lose end to end | Fused into a larger kernel, never as its own dispatch |
-| **W4A8 / INT4** | **Not available.** AIE2 has no int4 multiply-accumulate at all; that is Strix-class silicon | Not an option on this part |
+| **BF16** | Native, 128 MACs/cycle (half of int8). mlir-aie's whole-array bf16 GEMM, locally patched and measured by ignite-xdna, runs 1.5-2.1x this host's CPU at 2048x2048x2048 and larger; standalone activation kernels lose end to end. The compiler has no bf16 path in a release | Not an option in this release |
+| **W4A8 / INT4** | The silicon has it: AMD's AIE API lists a native 8-bit x 4-bit multiply (4x16x8) for this AIE generation. The compiler and runtime have no int4 path | Not an option in this release |
 
 A 7 % throughput cost for a model class that otherwise scores zero is a good trade. The same 7 % on a model that
 already works is not.

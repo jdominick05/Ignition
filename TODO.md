@@ -195,12 +195,13 @@ On the merge, through the same Ignition branch: YOLOv8s 17.15 ms and SESR M7 6.6
     environment here declares AGPL-3.0 and offers an Enterprise licence covering "Ultralytics software and AI
     models" in products that bypass the AGPL's requirements. Ignition and ignite-xdna are AGPL-3.0, but neither
     states the weights' terms, and ignite-xdna's README says upstream model artifacts "are not redistributed here".
-  - **ignite-xdna's file headers disagree with its licence.** Its LICENSE and README say AGPL-3.0, while 44 files
-    under `src/`, `tools/`, `npu/` and `kernels/` carry Apache-2.0 SPDX headers, 2 carry MIT, and `engine.cc`
-    carries none.
+  - **File headers now match the licence in both repos (2026-09-23).** ignite-xdna's `5ae1099` replaced the
+    Apache-2.0 headers and the false AMD copyright on files written there with AGPL-3.0-or-later; its genuine
+    mlir-aie copies keep AMD's notice. Ignition's own headers named AMD as the copyright holder too, and now name
+    "The Ignition contributors".
   - **Portability is unrecorded.** The manifest pins kernel and xclbin hashes but no NPU driver or XRT version,
     and the only verified setup is the one in the usage notes' [Compatibility](docs/USAGE.md#compatibility) table.
-  - **Split container resolution:** Splitting into an engine execution container (`.ignite-exec`, containing `engine.xclbin` and `insts.bin`) and a separate weights artifact (`wpackets.bin` or `.weights`) decouples bytecode from model weights. Precompiled engine bytecode can ship directly under Apache-2.0 in the release wheel, while weights are downloaded or supplied by the user under upstream terms without licence entanglement or toolchain dependencies.
+  - **Split container resolution:** Splitting into an engine execution container (`.ignite-exec`, containing `engine.xclbin` and `insts.bin`) and a separate weights artifact (`wpackets.bin` or `.weights`) decouples bytecode from model weights. Precompiled engine bytecode could then ship in the release wheel under the engine's own licence, AGPL-3.0-or-later, while weights are downloaded or supplied by the user under their upstream terms, with no toolchain dependency.
 - [ ] The published v0.2.0 notes still quote the figures v0.3.1 corrects. Decide whether to edit them.
 
 ### 3. Hardware coverage

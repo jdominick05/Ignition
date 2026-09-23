@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 The Ignition contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Refuse a bare native invocation in install.ps1, which silently corrupts a function's return value.
 
 In PowerShell a function's uncaptured output IS its return value. `Get-Python` called

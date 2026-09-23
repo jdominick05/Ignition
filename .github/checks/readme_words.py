@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2026 Advanced Micro Devices, Inc.
+# Copyright (C) 2026 The Ignition contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """README.md word budget: at most 250 words of prose.
 
