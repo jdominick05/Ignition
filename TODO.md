@@ -306,8 +306,9 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
   quantized models, so the answer is precision, not placement. (YOLO-World v2's turned out to be rounding, not a lack of
   bits: four convolutions whose output is a small difference of large terms, recovered at 8 bits with GPTQ rounding and
   int32 biases in ignite-xdna `80ca69e`.)
-- **INT16 activations.** The silicon runs them at 0.93 times int8's speed, but AMD's toolchain cannot express them
-  on XDNA1: at opset 17 its runtime rejects the quantization nodes, and at opset 21 its parser rejects the model.
+- **INT16 activations.** The silicon runs int16 x int8 at 128 MACs per cycle, half of int8 (SPEC; nothing ran end to
+  end), but AMD's toolchain cannot express them on XDNA1: at opset 17 Quark puts the 16-bit quantization nodes in a
+  domain its NPU provider does not match. Opset 21 was not tried.
 - **Placement.** Some models barely reach the NPU: YOLO11n gets 6 of 1,300 nodes and YOLO-World v2 48 of 1,081,
   which leaves them slower than the CPU alone. ignite-xdna's graph engine runs both with only their attention on the CPU
   (YOLO-World v2: 63 of its 67 convolutions on the NPU).
@@ -385,7 +386,8 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
   carries one output shift for its 32 output channels and a per-channel int32 bias, so per-channel weight scales are a
   change to the one engine program. On YOLO-World v2's collapsing convolutions, GPTQ at one scale per tensor was ahead
   of per-channel scales on two of four layers and within 4 dB on the other two, with no kernel change (ignite-xdna
-  `results/aie/yolow_gptq/cv2_cancellation.log`).
+  `results/aie/yolow_gptq/cv2_cancellation.log`). Until then the graph compiler lowers a per-channel scale vector
+  with channel 0's scale, silently (ignite-xdna `docs/DECISIONS.md`), so the model guide requires per-tensor weights.
 - [ ] **Open-vocabulary detection in Ignition.** ignite-xdna `6a39780`..`a78a500`: one YOLO-World v2 container takes
   any class names at run time, because the vocabulary enters only its CPU attention steps and the host decode
   (`YoloWorldPipeline.set_classes`, 90.1 ms for six names; 70/70 layers exact with another vocabulary). Renaming 23
@@ -416,6 +418,8 @@ claim is measured beside AMD's stack in one sitting, as the badges already are.
   - **Energy at 30 fps:** YOLOv8n does not separate from AMD's stack. YOLOv8n-pose spends less than AMD's stack and
     YOLOv8s more, with or without the flag.
   - **It stays a compiler flag.** YOLO11n and YOLO-World v2 cannot use it (their CPU segments), and SESR M7 has no SiLU.
+    *(2026-09-21: ignite-xdna `146e3eb` refuses only a CPU segment that holds a SiLU, so YOLO11n's attention-core
+    container takes the flag. YOLO-World v2 still cannot: its SiLU multiply is not quantized at scale 1/128.)*
 
   Decided by the maintainer (2026-09-17): Ignition's documented YOLOv8n, YOLOv8s and YOLOv8n-pose containers are
   compiled with the flag, released in v0.3.3. Re-measured in the release sitting against same-commit controls, the flag

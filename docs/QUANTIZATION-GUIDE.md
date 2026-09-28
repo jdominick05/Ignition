@@ -108,19 +108,19 @@ Measured per-frame traffic — the number to compare a design against:
 \* The weight column is a floor: the stream report counts a single-chunk layer's weight item as zero bytes.
 Activation and drain bytes are exact.
 
-Read the SESR row again: nine layers, no depth, no width — and the worst traffic per unit of work in the zoo. It
-is also the one model class where AMD's stack still wins outright, 3.65 ms against 6.67 ms
+Read the SESR row again: nine layers, no depth, no width — and the worst traffic per unit of work in the zoo. AMD's
+stack still wins on it, 4.35 ms against 4.78 ms
 ([measurements](PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)). Nine layers at 256x256x16 is the shape
 to avoid.
 
 ### What the runtime cannot take off the bill
 
-YOLOv8s is the other model AMD's stack wins, narrowly: **16.95 ms against 17.24 ms** in the same sitting
-([measurements](PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)). The gap is inside the NPU stage — AMD's
-`session.run` took 13.14 ms against Ignition's 16.70 ms dispatch — and Ignition's host work wins most of it back.
-Its 237.7 MB of fills per frame are the price, and that is now a **known limitation of this runtime**, not an
-open item. Every way of moving fewer bytes without changing the model was tried in ignite-xdna, and none
-survived:
+YOLOv8s is the other model AMD's stack wins: **16.75-16.79 ms against 18.18-18.21 ms** in the same sitting, with
+`--silu-sigmoid` ([measurements](PERFORMANCE.md#yolov8s-and-sesr-m7-against-amds-stack)). The gap is inside the NPU
+stage: AMD's `session.run` took 12.84-12.89 ms against Ignition's 17.11-17.12 ms dispatch. Its 237.7 MB of fills
+per frame are the price, and that is a **known limitation of this runtime**, not an open item. Every way of moving
+fewer bytes without changing the model was tried in ignite-xdna, and none survived. (One layout change did land,
+interleaving some tensors' channel blocks, but it cuts DMA descriptors, not bytes.)
 
 | Tried in the runtime | Result |
 |---|---|
@@ -139,8 +139,12 @@ The measurements are in ignite-xdna's
 
 ## 2. Stay inside the op vocabulary
 
-The engine has four opcodes — NOP, CONV, MAXPOOL, RESIDUAL — and the compiler accepts only what it can map onto
-them.
+The compiler maps a model onto three engine operations — CONV, MAXPOOL and RESIDUAL — and accepts only what fits
+them. The engine core holds more: an elementwise Mul, a per-channel Scale and a 5x5 average Pool are in it and
+bit-exact on silicon in a synthetic test, but no compiler path emits them yet, and the core has 224 B of program
+memory left
+([measurements](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#three-epilogue-opcodes-under-the-program-ram-budget-elementwise-mul-per-channel-scale-and-5x5-average-pool-bit-exact-on-silicon-2026-09-18-desktop-2)).
+Design to the three.
 
 **Compiles today**
 
@@ -150,15 +154,22 @@ them.
 - Residual add, including the per-operand left shifts that wider models need, and a HardSwish applied after the add
   (built for a split convolution; no model uses it yet, and it stays in the program for one that does).
 - Concat and slice, ReLU as an integer epilogue, and the HardSigmoid-and-multiply form the quantizer emits in
-  place of SiLU. That form is not free: on YOLO-World v2 the swap alone costs 11 points of mAP in FP32 (41.5 to 30.5 %
-  on the first 500 COCO images). `ignite-compile --silu-sigmoid` (ignite-xdna 0.3.1) replaces it on the NPU with a
-  four-line integer sigmoid, exact against an integer reference model: on all 5,000 COCO val2017 images YOLOv8n goes
-  from 27.10 to 34.12 mAP@50-95, YOLOv8s from 37.21 to 42.37 and YOLOv8n-pose from 32.71 to 44.16 OKS, for 2–4 % more
-  NPU dispatch. It needs no requantization, and the compiler refuses it for a model with CPU steps
-  ([measurements](PERFORMANCE.md#ignition-vs-amds-ryzen-ai-stack)).
+  place of SiLU. That form is not free: it is 63.5-74.8 % of the XINT8 loss on the YOLO models measured, and on
+  YOLO-World v2 the swap alone costs 11 points of mAP in FP32 (41.5 to 30.5 % on the first 500 COCO images).
+  `ignite-compile --silu-sigmoid` (ignite-xdna 0.3.1) replaces it on the NPU with a four-line integer sigmoid, exact
+  against an integer reference model: on all 5,000 COCO val2017 images YOLOv8n goes from 27.10 to 34.12 mAP@50-95,
+  YOLOv8s from 37.21 to 42.37 and YOLOv8n-pose from 32.71 to 44.16 OKS, for 2–4 % more NPU dispatch
+  ([measurements](PERFORMANCE.md#ignition-vs-amds-ryzen-ai-stack)). It needs no requantization.
+  - **With host segments** (ignite-xdna 0.3.2): refused only when a segment holds a SiLU the epilogue rewrites. An
+    attention core holds none, so YOLO11n gains 8.83 mAP for 0.257 ms and YOLO26n 8.81 for 0.260 ms. YOLO26n's int8
+    container with the epilogue (32.55) beats its own float model with HardSigmoid (29.55)
+    ([measurements](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#the-yolo26n-accuracy-loss-split-in-two-and-881-map-of-it-came-back-for-026-ms-2026-09-21-desktop-2)).
+  - **The rule a new model must meet:** the epilogue is fitted to a SiLU whose multiply output is quantized at scale
+    exactly 1/128 with zero point 128. YOLO-World v2's are not, so it cannot take the flag at all
+    ([measurements](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#the-sigmoid-epilogue-on-the-other-two-attention-models-yolo11n-gains-883-map-yolo-world-cannot-take-it-2026-09-21-desktop-2)).
 - Convolution biases in int8, as XINT8 writes them, or in int32 at the input scale times the weight scale, which the
-  engine's 32-bit accumulator takes unchanged. Needs ignite-xdna `80ca69e` or later, in no release yet: older versions
-  truncate an int32 bias to int8 without an error.
+  engine's 32-bit accumulator takes unchanged. Needs ignite-xdna `80ca69e` or later: older versions truncate an int32
+  bias to int8 without an error.
 
 **Does not compile**
 
@@ -201,9 +212,14 @@ Runtime's CPU provider between two NPU dispatches; SESR's `DepthToSpace` tail wo
 YOLO11n keeps its attention core — two matrix multiplies and a softmax — at **0.71-0.73 ms per frame** in the default
 power mode (0.55-0.57 ms in `performance`, whose CPU threads never sleep) and one
 ONNX Runtime call. Keep the region as small as the unsupported ops allow: with YOLO11n's whole C2PSA block on the CPU,
-convolutions included, the same step took 1.95-1.98 ms. The CPU step follows the power mode only with ignite-xdna
-`fbd53f5` or later, which is in no release yet. Use it for a tail or a single exotic block, never for something in the
-middle of a hot loop.
+convolutions included, the same step took 1.95-1.98 ms. The CPU step follows the power mode from ignite-xdna 0.3.1.
+Use it for a tail or a single exotic block, never for something in the middle of a hot loop.
+- **Export hygiene for an attention region:** torch's safe softmax exports as `Where(IsNaN(s), 0, s)` after every
+  softmax. In a 421M-parameter transformer's export (Laya) these guards were 54 % of the CPU's time outside the
+  weight products. Removing them changed no output, bit for bit: 2,403 inputs at batch 1, and 7 of them padded to
+  512 tokens
+  ([measurements](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#laya-on-the-npu-screened-the-floor-beats-the-cpu-and-the-780m-without-the-nan-guards-2026-09-26-desktop-2)).
+  Not measured on any YOLO host region; look for them in yours.
 
 Several regions cost more, and are sometimes still the only route. YOLO-World v2 runs its four text attention blocks as
 host segments in the middle of the neck, each with its projection convolution: 9.650 ms of a 48.227 ms profiled frame
@@ -212,7 +228,7 @@ host segments in the middle of the neck, each with its projection convolution: 9
   several tensors.
 - **Constants at run time:** a region's constants can be replaced at run time, which is how one YOLO-World container
   takes any class names (`EngineSession.set_host_constants`).
-- **Version:** these rules need ignite-xdna `206cfec` or later, in no release yet.
+- **Version:** these rules need ignite-xdna `206cfec` or later.
 
 ---
 
@@ -224,8 +240,12 @@ and drained, so the capacity comes out of bytes you are paying for anyway.
 **Spatial sizes that divide 20 and 5.** A map the tile does not divide uses overlapping edge tiles that recompute
 and rewrite the shared pixels.
 
-**Never go below the tile.** Maps narrower than 20 px waste lanes outright. This is exactly why ResNet50 has no
-container: 28 of its 53 convolutions run on maps smaller than the tile.
+**Never go below the tile.** Maps narrower than 20 px waste lanes outright. 28 of ResNet50's 53 convolutions run on
+maps smaller than the tile (the compiler stops it earlier, at its stem pool: §2).
+
+**Let the compiler audit the topology.** `ignite-compile` reports 5x5 convolutions and a stride-1 first spatial
+convolution by default, and `--topology-policy refuse` turns both into errors. It reports; it never rewrites the
+model, and no speed or accuracy gain from following it was measured.
 
 **Downsample early, then go deep and wide.** Early full-resolution layers dominate everything: YOLOv8n's first
 convolution alone is 6,553,600 B of fills and 3,276,800 B of drains per frame. Halving a map's side quarters its
@@ -244,11 +264,15 @@ four steps serve every model in the zoo.
 **1. Export at opset 17 and cut the head.** `1_export.py` writes the ONNX graph and `1b_cut_head.py` removes the
 decode tail, so the trunk ends at the raw head tensors and decode runs in native C on the host at 0.044 ms,
 against 0.28 ms for the numpy version. Opset 17 is not a preference: it is what the quantizer and the vendor
-runtime both accept.
+runtime both accept. The native decoder takes YOLOv8's 16-bin DFL box head and a DFL-free one (`reg_max` 1, as in
+YOLO26) from ignite-xdna 0.3.2; any other `reg_max` decodes in numpy.
 
 **2. Quantize plain XINT8 first, always.** `3b_quantize_cut.py` produces the format the engine expects:
 power-of-two scales, weights symmetric and clipped to [-127, 127], activations uint8 with zero point 128.
 Measure that before reaching for anything cleverer.
+- **Weight scales must be per tensor.** The graph compiler reads the first element of a weight's scale, so a
+  per-channel scale vector compiles without an error and runs every channel at channel 0's scale. Nothing checks
+  for it ([the pitfall](https://github.com/jdominick05/ignite-xdna/blob/main/docs/DECISIONS.md)).
 
 **3. Check for shift-cut collapse before believing any accuracy number.** RegNetX-002 lowered cleanly — 324 of
 326 nodes on the NPU at 2.45 ms — and scored **0.50 % top-1**, because a clamp (131 to -108) distorted the scale
@@ -287,6 +311,10 @@ took 2,953 s and 106 GB of spool.
 **6. But do care what is in the calibration set.** The count is a null; the content is not. A YOLOv8n container
 calibrated on coco128 finds 7 objects on `bus.jpg` where the benchmarked container finds 5. Calibrate on images
 that look like the deployment, and evaluate on the full set before quoting accuracy.
+- **Keep calibration images out of the evaluation set.** ignite-xdna's default COCO calibration folder is 300
+  images from inside val2017. Rescored on the 4,700 others, none of the files checked moved more than 0.07 mAP and
+  the AdaRound gains held. Still, an overlap flatters most the methods fitted to their calibration images
+  (INFERRED), so keep the two sets apart.
 
 **7. Treat input resolution as an accuracy knob, not only a latency knob.** ResNet50's plain-XINT8 accuracy peaked
 at 256x256, not at the 224x224 everyone assumes.
@@ -301,12 +329,14 @@ never has to rewrite one, **channel counts padded to multiples of 16, 32 or 64**
 **RepVGG-style reparameterization** so inference collapses to plain convolutions. The bar worth aiming at is
 100 % of nodes on the NPU at roughly no loss under *plain* XINT8, with AdaRound left in the drawer.
 
-Two failure modes are worth designing out from the start, because both were measured here and one is invisible
-until you reach silicon:
+Two structures are worth designing out from the start, because both were measured here:
 
-- **Multi-branch gating that multiplies branches at different scales.** BiSeNetV2 read 59.47 % pixel accuracy
-  under CPU simulation and **15.33 % on the physical device**. Fixed-point elementwise multiplication across
-  disparate branch scales attenuates minority classes, and simulation will not warn you.
+- **Multi-branch gating that multiplies two activations.** The compiler cannot map that multiply, so a gated
+  block runs as a host segment (BiSeNetV2's does, §1). An earlier version of this guide blamed its fixed-point
+  scales for a collapse on the device. That was wrong: the 59.47 % against 15.33 % was pixel agreement on
+  out-of-domain images between the CPU and AMD's stack, the multiply and its inputs measured clean, and this
+  engine runs BiSeNetV2 exactly (50 of 50 images match the CPU reference)
+  ([measurements](PERFORMANCE.md#segmentation-and-matting-hybrid-paths-against-amds-stack)).
 - **Softmax in the trunk.** MobileViT-XXS survives INT8 at **0.00 % top-1**, and the engine has no softmax op in
   any case.
 
@@ -317,12 +347,29 @@ until you reach silicon:
 | Precision | Status on Phoenix (AIE2) | When to use it |
 |---|---|---|
 | **INT8 (XINT8)** | The default path, 256 MACs/cycle | Everything, unless it collapses |
-| **INT16 activations** | Native, but 64 MACs/cycle; measured at **0.93x int8** end to end (0.68-1.04x) | Models that collapse at 8 bits: +48.2 dB SQNR. The vendor runtime path is deadlocked — opset 17 forces quantization nodes it rejects, opset 21 its parser rejects |
-| **BF16** | Native, 128 MACs/cycle (half of int8). mlir-aie's whole-array bf16 GEMM, locally patched and measured by ignite-xdna, runs 1.5-2.1x this host's CPU at 2048x2048x2048 and larger; standalone activation kernels lose end to end. The compiler has no bf16 path in a release | Not an option in this release |
-| **W4A8 / INT4** | The silicon has it: AMD's AIE API lists a native 8-bit x 4-bit multiply (4x16x8) for this AIE generation. The compiler and runtime have no int4 path | Not an option in this release |
+| **INT16 activations, int8 weights** | Native: int16 x int8 at 128 MACs/cycle, half of int8 (SPEC). Its matrix shapes compile; nothing ran end to end on this engine | Not an option in this release. It would add 48.2 dB of range (DERIVED) for a model that collapses at 8 bits. AMD's stack runs none of it at opset 17: Quark puts the 16-bit quantization nodes in a domain its NPU provider does not match. Opset 21 was not tried |
+| **BF16** | Native, 128 MACs/cycle (half of int8). mlir-aie's whole-array bf16 GEMM runs 1.13-1.78x this host's CPU, and 1.29-1.89x with a local single-buffer patch (best 2,700.44 GFLOPS). A hand-scheduled tile reaches 86.3 % of a core's bf16 peak. The compiler has no bf16 path in a release | Not an option in this release |
+| **W4A8 / INT4** | Native: the engine's uint8 x int4 is bit-exact on this chip, 1.88x the int8 loop per core and 1.287x int8 on the whole array (6,206.73 GOPS). The compiler and runtime have no int4 path | Not an option: round-to-nearest int4 weights take YOLOv8n from 27.10 to 0.06 mAP and YOLOv8s from 37.21 to 2.76, and inside today's fixed 9,472 B weight packets int4 saves no bytes |
 
-A 7 % throughput cost for a model class that otherwise scores zero is a good trade. The same 7 % on a model that
-already works is not.
+Sources: ignite-xdna's [SILICON.md](https://github.com/jdominick05/ignite-xdna/blob/main/docs/SILICON.md) and
+[int4 gates](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#int4-on-phoenix-gates-first-the-chip-runs-the-engines-uint8--int4-and-on-paper-the-current-weight-packets-leave-int4-little-to-save-2026-09-23-desktop-2).
+Two research branches go further, and neither is in a release:
+- **bf16 engine** ([`worktree-bf16-engine`](https://github.com/jdominick05/ignite-xdna/blob/worktree-bf16-engine/docs/BENCHMARKS.md#the-float-case-for-bf16-closed-negative-on-all-three-candidate-models-2026-09-22)):
+  bf16 runs byte-exactly on all 16 cores in a synthetic check. SESR M7 with int8 weights and bf16 activations
+  gains 0.41 dB over int8, and its tile beats the CPU but takes 3.3-3.8x AMD's int8 tile. The float case for bf16
+  closed negative on SESR M7, Real-ESRGAN and MODNet-Cut: none loses enough to int8 to pay for bf16's traffic.
+- **int4 recovery** ([`worktree-int4-vision`](https://github.com/jdominick05/ignite-xdna/tree/worktree-int4-vision)):
+  YOLOv8n comes within 0.48 mAP of int8 only with per-output-channel int4 weights, a form the engine cannot lower.
+  YOLOv8s misses by 2.79 at best across the post-training methods tried; training with int4 in the loop was not
+  tried.
+
+**For a transformer, bf16 is the precision that held.** In Laya, a 421M-parameter ModernBERT model, all 124 weight
+products in bf16 with fp32 accumulation kept 2,395 of its 2,400 decisions on six public tasks (−0.08 points). ONNX
+Runtime's dynamic int8, which takes one activation scale per call and is not XINT8, kept 1,667 (−7.96 points). At
+512 tokens its bf16 weight products run 1,731-2,352 GFLOPS on the array
+([accuracy](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#laya-in-bf16-and-int8-bf16-keeps-its-decisions-orts-dynamic-int8-does-not-2026-09-26-desktop-2),
+[speed](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#laya-on-the-npu-screened-the-floor-beats-the-cpu-and-the-780m-without-the-nan-guards-2026-09-26-desktop-2)).
+This runtime has no transformer path; the figures are for choosing a precision.
 
 ---
 
@@ -339,15 +386,19 @@ where the task genuinely needs it**.
 | Add a layer at low resolution | Cheap: one more pass over a small map |
 | Add a layer at full resolution | Expensive: fills run about 4x the tensor |
 | Use a 5x5 convolution at stride 1 | One packet per 8 input channels instead of 32: up to 4x a 3x3's fills, 73 % of each plane never read |
-| Move a block to the host | About 0.5 ms per frame and one ONNX Runtime call for YOLO11n's attention core, 9.650 ms for YOLO-World v2's four attention blocks, and the container stops being pure NPU |
+| Move a block to the host | 0.72 ms per frame and one ONNX Runtime call for YOLO11n's attention core, 9.650 ms for YOLO-World v2's four attention blocks, and the container stops being pure NPU. A transformer's host part dominates: Laya's attention, norms and elementwise work take 269-607 ms per 512 tokens on 8 CPU threads, against 192 ms for its weight products on the NPU (DERIVED) |
 
 ---
 
 ## 8. Validate in this order
 
 1. **Layer exactness.** ignite-xdna's `tools/verify_engine_container.py` compares every layer and head against
-   ONNX Runtime's CPU provider on the same quantized model; YOLOv8n reads 66 of 66 exact. A model that is not
-   layer-exact is a compiler bug, not a quantization result, and the two must never be diagnosed together.
+   ONNX Runtime's CPU provider on the same quantized model. Build the container you verify with
+   `--no-workspace-reuse`: YOLOv8n then reads 66 of 66 exact. A default build shares workspace slots, so only 25
+   layers stay readable and the tool checks the other 41 slots' last writers instead
+   ([why](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#workspace-reuse-makes-41-of-66-layer-readbacks-unobservable-what-verify_engine_container-can-and-cannot-see-2026-09-18-desktop-2)).
+   A model that is not layer-exact is a compiler bug, not a quantization result, and the two must never be
+   diagnosed together.
 2. **Accuracy on the full dataset**, never on one image. The pipelines' `5_eval_map.py` and its pose equivalent
    run all 5,000 COCO images; single-image impressions have been wrong here before.
 3. **Latency in one quiet sitting**, with the NPU idle before each run (`xrt-smi examine -r aie-partitions`) and
@@ -365,11 +416,14 @@ where the task genuinely needs it**.
 - [ ] No feature map is narrower than 20 px, and spatial sizes divide 20 and 5 where they can.
 - [ ] Resolution drops early; depth and width come after the first downsample.
 - [ ] No depthwise or grouped convolutions in the hot path.
-- [ ] 5x5 convolutions at stride 1 only where a 3x3 cannot do the job, and never on a wide full-resolution input.
-- [ ] No softmax, no cross-branch multiply at mismatched scales, no bilinear upsample.
-- [ ] Activations are ReLU or HardSwish, and clamping is power-of-two in the forward pass.
-- [ ] Calibration data looks like the deployment, at 32-64 images.
-- [ ] An exactness gate is wired up before any accuracy claim.
+- [ ] 5x5 convolutions at stride 1 only where a 3x3 cannot do the job, and never on a wide full-resolution input;
+      `ignite-compile --topology-policy refuse` passes.
+- [ ] No softmax, no activation-by-activation multiply, no bilinear upsample outside a declared host segment.
+- [ ] Activations are ReLU or HardSwish, and clamping is power-of-two in the forward pass. A SiLU you keep has its
+      multiply output at scale 1/128, zero point 128, so `--silu-sigmoid` can take it.
+- [ ] Weight scales are per tensor.
+- [ ] Calibration data looks like the deployment, at 32-64 images, and none of it is in the evaluation set.
+- [ ] An exactness gate is wired up before any accuracy claim, on a `--no-workspace-reuse` build.
 
 Related reading: [what each model costs here](PERFORMANCE.md), and, in ignite-xdna,
 [MODEL_ZOO_BENCHMARKS.md](https://github.com/jdominick05/ignite-xdna/blob/main/docs/MODEL_ZOO_BENCHMARKS.md) for
