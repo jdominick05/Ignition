@@ -70,6 +70,7 @@ The geometry is the same for every model:
 | Activation packet | 6,400 B, whatever the layer |
 | Joined drain object | 12,800 B (four 3,200 B core outputs) |
 | Cores | 4 columns x 4 rows |
+| Quad (what one core column computes per round) | 20 rows x 20 columns: four 5-row tiles stacked |
 | DMA repeat limit | 64 per shim task |
 
 Three multipliers follow from that geometry, and they are what you design against:
@@ -151,8 +152,14 @@ Design to the three.
 - Convolutions: **1x1 stride 1 pad 0**, **3x3 stride 1 or 2 pad 1**, **5x5 stride 1 pad 2**.
 - 2x nearest-neighbour upsample, fused into the consumer's input.
 - Max pool (the 5x5 SPPF pool; pooling forces a halo of 2).
-- Residual add, including the per-operand left shifts that wider models need, and a HardSwish applied after the add
-  (built for a split convolution; no model uses it yet, and it stays in the program for one that does).
+- Residual add, including the per-operand left shifts that wider models need, and an activation after the add, run as
+  the residual step's epilogue:
+  - a **ReLU**, which makes a standard ResNet block (ignite-xdna `b58ea8f`, in no release yet). It is 14 of 14 layers
+    exact on silicon in a 5x20 probe model, and costs about 2 % more dispatch than the same model with the ReLU before
+    the add ([measurements](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#five-row-maps-on-the-existing-core-a-5x20-sensor-model-compiles-whole-and-layer-exact-and-is-13x-slower-than-one-cpu-thread-2026-09-28-desktop-2));
+  - or a HardSwish, built for a split convolution.
+
+  No shipped model uses either.
 - Concat and slice, ReLU as an integer epilogue, and the HardSigmoid-and-multiply form the quantizer emits in
   place of SiLU. That form is not free: it is 63.5-74.8 % of the XINT8 loss on the YOLO models measured, and on
   YOLO-World v2 the swap alone costs 11 points of mAP in FP32 (41.5 to 30.5 % on the first 500 COCO images).
@@ -186,11 +193,17 @@ Design to the three.
   host region automatically, so a whole classifier compiles and is correct — but it declares **one host
   segment**, and a container with any host segment is a hybrid, not a network wholly on the NPU. Only a
   model whose input already holds pooled features reaches 0 host segments. Build expecting the host step.
-- **Every stored map must be at least one 20-pixel tile, which decides your input size.** A /32 backbone at
-  224 ends at 7x7 and fails with `a 14-pixel map is smaller than one 20-pixel tile` (measured on
+- **Every stored map must be at least 20 pixels wide, and exactly 5 or at least 20 rows tall, which decides your
+  input size.** A core computes a 5x20 tile, but the scheduler issues a column of four cores as one 20-row quad. A
+  /32 backbone at 224 ends at 7x7 and fails with `a 14-pixel map is smaller than one 20-pixel tile` (measured on
   `yolov8n-cls` at 224); at 640 the same graph compiles and verifies 28/28 layers exact on silicon. That is
   8x the arithmetic of a 224 classifier — a classifier here is priced at 640, not at the resolution its
   accuracy was reported at.
+  - **Five rows is the one exception** (ignite-xdna `b58ea8f`, in no release yet). A map exactly one tile row tall
+    compiles: a sensor window, say, rather than an image. The quad's other three core rows compute into scratch
+    copies, so those tensors take 4x the workspace and three of each column's four cores do no useful work.
+  - 10 and 15 rows still refuse.
+  - What such a model costs is in [§7](#7-where-the-balance-sits).
 - **Classification is where the op set bites hardest.** Of 15 XINT8 classifiers put through the compiler,
   **one** reached a schedulable graph. ResNet50, wide_resnet50_2, wide_resnet101_2, resnext50_32x4d and
   densenet121 all stop at a **3x3 stride-2 `MaxPool`** the core does not implement (it takes only the SPPF
@@ -241,7 +254,8 @@ and drained, so the capacity comes out of bytes you are paying for anyway.
 and rewrite the shared pixels.
 
 **Never go below the tile.** Maps narrower than 20 px waste lanes outright. 28 of ResNet50's 53 convolutions run on
-maps smaller than the tile (the compiler stops it earlier, at its stem pool: §2).
+maps smaller than the tile (the compiler stops it earlier, at its stem pool: §2). Below 20 rows only exactly 5
+compiles, and it pays for four core rows to use one (§2).
 
 **Let the compiler audit the topology.** `ignite-compile` reports 5x5 convolutions and a stride-1 first spatial
 convolution by default, and `--topology-policy refuse` turns both into errors. It reports; it never rewrites the
@@ -385,7 +399,8 @@ where the task genuinely needs it**.
 | Pad 16 channels to 32 | **Free** — the junk planes are drained either way |
 | Add a layer at low resolution | Cheap: one more pass over a small map |
 | Add a layer at full resolution | Expensive: fills run about 4x the tensor |
-| Use a 5x5 convolution at stride 1 | One packet per 8 input channels instead of 32: up to 4x a 3x3's fills, 73 % of each plane never read |
+| Use a 5x5 convolution at stride 1 | One packet per 8 input channels instead of 32: up to 4x a 3x3's fills, 73 % of each plane never read. On a 64-channel 5x20 model, 2.2x the dispatch of the same blocks in 3x3 (1.44 against 0.65 ms) |
+| Run a small model (one 5x20 map, 14 layers) | About 1.3x one CPU thread's latency: 0.725-0.726 ms a call, float in to float out, against 0.554-0.566 ms for ONNX Runtime FP32 on one thread in the same sitting. The host spends under 0.15 ms of CPU per call against 0.56-0.58, so the NPU buys a free core, not speed. Why 14 layers of 5x20 take 0.65 ms of dispatch is unexplained ([measurements](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#five-row-maps-on-the-existing-core-a-5x20-sensor-model-compiles-whole-and-layer-exact-and-is-13x-slower-than-one-cpu-thread-2026-09-28-desktop-2)) |
 | Move a block to the host | 0.72 ms per frame and one ONNX Runtime call for YOLO11n's attention core, 9.650 ms for YOLO-World v2's four attention blocks, and the container stops being pure NPU. A transformer's host part dominates: Laya's attention, norms and elementwise work take 269-607 ms per 512 tokens on 8 CPU threads, against 192 ms for its weight products on the NPU (DERIVED) |
 
 ---
@@ -413,7 +428,8 @@ where the task genuinely needs it**.
 
 - [ ] Every op in the trunk is on the compiles-today list; exotic blocks are isolated at the tail.
 - [ ] Channel counts are multiples of 32.
-- [ ] No feature map is narrower than 20 px, and spatial sizes divide 20 and 5 where they can.
+- [ ] No feature map is narrower than 20 px, none is 6-19 rows tall (exactly 5 compiles, at 4x workspace), and
+      spatial sizes divide 20 and 5 where they can.
 - [ ] Resolution drops early; depth and width come after the first downsample.
 - [ ] No depthwise or grouped convolutions in the hot path.
 - [ ] 5x5 convolutions at stride 1 only where a 3x3 cannot do the job, and never on a wide full-resolution input;
