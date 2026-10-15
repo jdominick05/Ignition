@@ -239,6 +239,13 @@ With spinning threads on 2026-09-15 the YOLOv8s gap was 0.30 ms; in the default 
   `results/aie/weight_buffer_phoenix_20260916T1508Z.log`, `results/aie/memtile_hop_phoenix_20260916T1523Z.log`).
   The traffic that remains is cut by model shape ([model guide](docs/QUANTIZATION-GUIDE.md#what-the-runtime-cannot-take-off-the-bill)).
   SESR M7's dispatch target in §1 is not closed by this.
+- [ ] **Re-run the AMD comparison on layer overlap.** Since ignite-xdna `db8578a` (in no release yet) the compiler
+  overlaps layers by default. In one dispatch sitting it saved 1.00 ms on YOLOv8n, 1.31 ms on YOLOv8s (both
+  `--silu-sigmoid`), 1.14 ms on pose and 0.08 ms on SESR M7, exact on every one.
+  - **Why it matters:** the YOLOv8s gap above was 1.4 ms end to end, so the YOLOv8s row may now go the other way.
+  - **What to run:** rebuild the containers, then run both stacks in one sitting, interleaved, as in "Read before
+    changing anything".
+  - **Until then,** the AMD rows and badges stand as measured.
 
 ### 5. Compile time (ignite-xdna)
 

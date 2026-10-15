@@ -135,6 +135,25 @@ The same effort spent on the model moves further: halving the input side quarter
 The measurements are in ignite-xdna's
 [BENCHMARKS.md](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#memtile-residency-does-not-pay-on-the-graph-engine-and-the-yolov8s-gap-is-a-known-limitation-2026-09-16-desktop-2).
 
+One runtime change has paid since, and it moves the same bytes: **layer overlap**. The engine used to wait for every
+transfer of a layer to finish before starting the next. Since ignite-xdna `db8578a` (in no release yet) the compiler
+drops that wait by default, wherever a container allows it. Each transfer then waits only for the earlier transfers
+whose memory it shares. The next layer's activations stream in while the cores finish the last one. It is exact on
+every container it reaches.
+
+It took these off the NPU dispatch, in one sitting:
+
+| Model | Dispatch saved |
+|---|---:|
+| YOLOv8n with `--silu-sigmoid` | 1.00 ms |
+| YOLOv8s with `--silu-sigmoid` | 1.31 ms |
+| YOLOv8n-pose | 1.14 ms |
+| SESR M7 | 0.08 ms (nine layers leave few boundaries to overlap) |
+
+These are dispatch times, not frame times. The AMD comparisons above have not been re-run on it
+([measurements](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#layer-overlap-is-the-compilers-default-yolov8n-100-ms-yolov8s-131-pose-114-sesr-m7-008-every-container-exact-2026-10-15-desktop-2)).
+Rebuild a container with the current compiler to get it; `ignite-compile --no-overlap-layers` builds the old form.
+
 ---
 
 ## 2. Stay inside the op vocabulary
@@ -204,6 +223,10 @@ ONNX Runtime call. Keep the region as small as the unsupported ops allow: with Y
 convolutions included, the same step took 1.95-1.98 ms. The CPU step follows the power mode only with ignite-xdna
 `fbd53f5` or later, which is in no release yet. Use it for a tail or a single exotic block, never for something in the
 middle of a hot loop.
+
+A host segment has a second price. Layer overlap (above) is off for any container with a CPU step anywhere in it, so
+every layer of that container waits for the one before it to finish. On the YOLOv8 detectors without a CPU step,
+overlap measured 1.00-1.31 ms of dispatch. What it would save on a container that has one has not been measured.
 
 Several regions cost more, and are sometimes still the only route. YOLO-World v2 runs its four text attention blocks as
 host segments in the middle of the neck, each with its projection convolution: 9.650 ms of a 48.227 ms profiled frame
