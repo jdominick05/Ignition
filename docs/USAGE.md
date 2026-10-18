@@ -27,7 +27,7 @@ worth its hours, and how to validate the result before quoting a number.
 
 ## Other ways to install
 
-**From a release.** Download the wheels from the [v0.3.3 release](https://github.com/jdominick05/Ignition/releases/tag/v0.3.3) into one folder and run pip in that folder; GitLab's release carries the same files. For the NPU path:
+**From a release.** Download the wheels from the [v0.3.3 release](https://github.com/jdominick05/Ignition/releases/tag/v0.3.3) into one folder and run pip in that folder. For the NPU path:
 
 ```bash
 pip install ./ignite_xdna-0.3.1-py3-none-any.whl "./ignition_ai-0.3.3-py3-none-any.whl[npu]"
