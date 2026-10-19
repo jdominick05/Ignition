@@ -2,6 +2,13 @@
 
 Every figure on this page was measured on a Ryzen 7 8700G (Phoenix NPU) under Windows 11. The README's badges read their numbers from this page.
 
+**Where the models come from.** Ignition runs models; it does not build them. Every container and quantized model is
+built by its [recipe in ignite-xdna](https://github.com/jdominick05/ignite-xdna/blob/main/recipes/README.md): pinned
+downloads, export, quantization and compile, replayed by `tools/recipe.py build <model>`. From the 2026-10-19 sitting
+on, each container's manifest records the recipe step and the compiler commit that built it, and each sitting checks
+that the container was compiled from the same quantized ONNX file AMD's stack runs. Earlier sittings name their
+container and commit in their own text.
+
 The checkout-only [workspace agent](WORKSPACE-AGENT.md) has bounded functional
 qualification in the parent study's BENCHMARKS record. It has no qualified speed
 result and does not change the released vision measurements below.
