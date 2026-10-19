@@ -61,6 +61,7 @@ claude-handoff.*.md
 scripts/
 benchmarks/
 results/
+scratch/
 tests/
 tools/
 .pytest_cache/
