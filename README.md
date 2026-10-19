@@ -1,13 +1,9 @@
-``` 
-██╗ ██████╗ ███╗   ██╗██╗████████╗██╗ ██████╗ ███╗   ██╗
-██║██╔════╝ ████╗  ██║██║╚══██╔══╝██║██╔═══██╗████╗  ██║
-██║██║  ███╗██╔██╗ ██║██║   ██║   ██║██║   ██║██╔██╗ ██║
-██║██║   ██║██║╚██╗██║██║   ██║   ██║██║   ██║██║╚██╗██║
-██║╚██████╔╝██║ ╚████║██║   ██║   ██║╚██████╔╝██║ ╚████║
-╚═╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝   ╚═╝   ╚═╝ ╚═════╝ ╚═╝  ╚═══╝                            
-```
+<p align="center"><img src="docs/banner.svg" alt="Ignition: real-time YOLO on the Ryzen AI NPU" width="100%"></p>
 
-**Real-time YOLO on the AMD Ryzen™ AI NPU: YOLOv8n, YOLO11n, YOLO26n and YOLOv8n-pose run faster end to end than on AMD's own runtime, and more accurately, from a fraction of the install size.**
+<p align="center"><b>Real-time YOLO on the AMD Ryzen™ AI NPU: YOLOv8n, YOLO11n, YOLO26n and YOLOv8n-pose run faster end to
+end than on AMD's own runtime, and more accurately, from a fraction of the install size.</b></p>
+
+<div align="center">
 
 <!-- badges:start: generated from .github/badges/badges.toml by .github/badges/badges.py -->
 ![NPU: AMD Phoenix XDNA1](https://img.shields.io/badge/NPU-AMD%20Phoenix%20XDNA1-ed1c24)
@@ -25,12 +21,22 @@
 [![YOLO11n energy per frame at full speed, Ignition's default balanced power mode and AMD's stack, both runs](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjdominick05%2FIgnition%2Fmain%2Fdocs%2FPERFORMANCE.md&search=%5C%7C%20YOLO11n%20%5C%7C%20AMD%5B%5E%7C%5D%2A%5C%7C%5B%5E%7C%5D%2A%5C%7C%5B%5E%7C%5D%2A%5C%7C%20%5C%2A%2A%28%5B0-9.%2C%5D%2B%29%20%2F%20%28%5B0-9.%2C%5D%2B%29%20mJ%28%3Fs%3A.%2A%3F%29%5C%7C%20YOLO11n%20%5C%7C%20Ignition%5B%5E%7C%5D%2A%5C%7C%20balanced%20%5C%7C%5B%5E%7C%5D%2A%5C%7C%20%5C%2A%2A%28%5B0-9.%2C%5D%2B%29%20%2F%20%28%5B0-9.%2C%5D%2B%29%20mJ&replace=%243%20%2F%20%244%20mJ%20vs%20AMD%20%241%20%2F%20%242%20mJ&label=YOLO11n%20energy%20per%20frame&color=brightgreen)](docs/PERFORMANCE.md#energy-per-frame-against-amds-stack)
 <!-- badges:end -->
 
-Ignition compiles a YOLO model into an `.ignite` container that runs on the NPU of a Windows 11 PC with an
-AMD Phoenix processor.
+</div>
+
+Ignition compiles a model into an `.ignite` container that runs on the NPU of a Windows 11 PC with an AMD Phoenix
+processor.
+
+| Model | Task | On the NPU |
+|---|---|---|
+| YOLOv8n, YOLOv8s | Detection | Every layer |
+| YOLOv8n-pose | Pose | Every layer |
+| YOLO11n | Detection | All but one attention block |
+| YOLO26n | Detection | All but two attention blocks |
+| SESR M7 | 2x super-resolution | Every layer |
 
 ## 1. Install
 
-Paste into PowerShell, and again later to update:
+Paste into PowerShell (again later to update):
 
 ```powershell
 irm https://raw.githubusercontent.com/jdominick05/Ignition/main/install.ps1 | iex
@@ -44,8 +50,8 @@ It sets up everything under `%LOCALAPPDATA%\Ignition`. To also install AMD's NPU
 
 ## 2. Get a model
 
-Download YOLOv8n from Hugging Face, export it and cut its decode head, which runs on the CPU. Containers expect YOLOv8's
-80 COCO classes, so use the published weights rather than a model retrained on other labels:
+Download YOLOv8n, export it and cut off the decode head, which runs on the CPU. Containers expect the 80 COCO
+classes, so use the published weights:
 
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process -Force; . "$env:LOCALAPPDATA\Ignition\ignition-models.ps1"
@@ -64,8 +70,8 @@ Expand-Archive coco128.zip data
 python pipelines/yolov8n/3b_quantize_cut.py --calib-dir data/coco128/images/train2017
 ```
 
-On the test PC this took 5 minutes and 13.5 GB of temporary disk. Quark's warnings that it cannot build custom ops
-are harmless. Calibration images shape the result, so your detections can differ from the benchmarks'.
+This took 5 minutes and 13.5 GB of temporary disk on the test PC. Quark's custom-op warnings are harmless. The
+benchmarks calibrated on other images, so your detections can differ.
 
 ## 4. Compile and run
 
@@ -77,9 +83,8 @@ ignite-compile --input ..\ignite-xdna\models\yolov8n_cut_xint8.onnx --output ..\
 python live_ignition.py
 ```
 
-`--silu-sigmoid` approximates SiLU more closely than AMD's quantizer: 34.12 against 26.68 COCO mAP, for 0.24 ms
-per frame. A window opens on webcam 0 with boxes, labels and latency; press q to quit. Add
-`--source picture.jpg` for an image.
+`--silu-sigmoid` computes SiLU more accurately than AMD's quantizer. A window opens on webcam
+0; press q to quit, or add `--source picture.jpg` for an image.
 
 ## More
 
