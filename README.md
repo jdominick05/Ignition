@@ -55,7 +55,8 @@ classes, so use the published weights:
 
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process -Force; . "$env:LOCALAPPDATA\Ignition\ignition-models.ps1"
-hf download Ultralytics/YOLOv8 yolov8n.pt --local-dir models
+New-Item -ItemType Directory -Force models | Out-Null
+iwr https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt -OutFile models\yolov8n.pt
 python pipelines/yolov8n/1_export.py
 python pipelines/yolov8n/1b_cut_head.py
 ```
@@ -67,11 +68,12 @@ The NPU runs 8-bit integers. Quark calibrates on sample images; COCO's first 128
 ```powershell
 iwr https://github.com/ultralytics/assets/releases/download/v0.0.0/coco128.zip -OutFile coco128.zip
 Expand-Archive coco128.zip data
-python pipelines/yolov8n/3b_quantize_cut.py --calib-dir data/coco128/images/train2017
+python pipelines/yolov8n/3b_quantize_cut.py --calib-dir data/coco128/images/train2017 --out models/yolov8n_cut_xint8_coco128.onnx
 ```
 
-This took 5 minutes and 13.5 GB of temporary disk on the test PC. Quark's custom-op warnings are harmless. The
-benchmarks calibrated on other images, so your detections can differ.
+This took 5 minutes and 13.5 GB of temporary disk on the test PC; Quark's custom-op warnings are harmless. This is
+the [YOLOv8n recipe](https://github.com/jdominick05/ignite-xdna/blob/main/recipes/yolov8n.toml)'s quickstart. The
+badges measure its benchmark model.
 
 ## 4. Compile and run
 
@@ -79,8 +81,8 @@ In the same window:
 
 ```powershell
 . "$env:LOCALAPPDATA\Ignition\ignition-env.ps1"
-ignite-compile --input ..\ignite-xdna\models\yolov8n_cut_xint8.onnx --output ..\ignite-xdna\build\yolov8n_full.ignite --silu-sigmoid
-python live_ignition.py
+ignite-compile --input ..\ignite-xdna\models\yolov8n_cut_xint8_coco128.onnx --output ..\ignite-xdna\build\yolov8n_quickstart.ignite --silu-sigmoid
+python live_ignition.py --model ..\ignite-xdna\build\yolov8n_quickstart.ignite
 ```
 
 `--silu-sigmoid` computes SiLU more accurately than AMD's quantizer. A window opens on webcam
