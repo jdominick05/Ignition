@@ -344,6 +344,19 @@ until you reach silicon:
 | **BF16** | Native, 128 MACs/cycle (half of int8). mlir-aie's whole-array bf16 GEMM, locally patched and measured by ignite-xdna, runs 1.5-2.1x this host's CPU at 2048x2048x2048 and larger; standalone activation kernels lose end to end. The compiler has no bf16 path in a release | Not an option in this release |
 | **W4A8 / INT4** | The silicon has it: AMD's AIE API lists a native 8-bit x 4-bit multiply (4x16x8) for this AIE generation. The compiler and runtime have no int4 path | Not an option in this release |
 
+The checkout-only [hybrid Gemma assistant](HYBRID-ASSISTANT.md) is a separate
+experimental BF16 command runtime in ignite-xdna. Its optional second packet
+input buffer changes transport buffering, not model precision or the released
+ONNX compiler's supported operations. It does not change this table's release
+availability or the XINT8 model-building recipe.
+That command runtime also offers exact-bit vector copies for aligned activation
+spans, with scalar handling for unaligned offsets and tails; this is a data
+movement option in the experimental runtime, not a new quantization format.
+Its explicit larger-context mode uses a multi-chunk softmax schedule and
+verified rotary constants; it does not expand the released ONNX compiler's
+precision or operator vocabulary. See the assistant reference for current
+prompt limits and the required local assets.
+
 A 7 % throughput cost for a model class that otherwise scores zero is a good trade. The same 7 % on a model that
 already works is not.
 

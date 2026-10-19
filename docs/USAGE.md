@@ -2,6 +2,17 @@
 
 Reference for what the README's walkthrough leaves out. Install with the README's one-step installer first.
 
+The checkout-only [experimental hybrid Gemma assistant](HYBRID-ASSISTANT.md)
+has a separate token streaming interface and requires prepared study assets.
+Its [bounded workspace agent](WORKSPACE-AGENT.md) adds native read-only tools
+and arithmetic through `ignition.experimental.HybridAgent`.
+Both wrappers also expose an opt-in bounded GPU activity experiment; its
+scope and energy limitations are documented with the hybrid assistant.
+The separate `ignition.experimental.prefix_bound.PrefixBoundAssistant` offers
+owned NPU prefix binding, also available through the study chat launcher's
+`-PrefixBinding -InputDepth 2 -VectorCopy` switches. Its contract and measured
+scope are in the same assistant reference; the ordinary wrapper stays the control.
+
 Building a model of your own is a separate subject: [QUANTIZATION-GUIDE.md](QUANTIZATION-GUIDE.md), beside this
 file, covers which operations compile, the shapes the NPU's tile rewards, the XINT8 recipe, where AdaRound is
 worth its hours, and how to validate the result before quoting a number.

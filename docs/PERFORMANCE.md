@@ -2,6 +2,17 @@
 
 Every figure on this page was measured on a Ryzen 7 8700G (Phoenix NPU) under Windows 11. The README's badges read their numbers from this page.
 
+The checkout-only [workspace agent](WORKSPACE-AGENT.md) has bounded functional
+qualification in the parent study's BENCHMARKS record. It has no qualified speed
+result and does not change the released vision measurements below.
+An opt-in GPU activity helper reduces an idle-gap penalty in bounded request
+diagnostics. Its records remain in the parent study; energy efficiency and
+net acceleration remain unqualified, and it is disabled by default. The current
+runtime stops and joins helper activity before target GPU verification.
+The separate opt-in `PrefixBoundAssistant` reduces repeated host prefix packing
+in bounded diagnostics. Its evidence remains in the parent study; these
+observations do not qualify net acceleration, energy or unattended operation.
+
 ## Ignition vs AMD's Ryzen AI stack
 
 **Against AMD's stack: 8.50 / 8.53 ms and 34.12 mAP@50-95, against 10.66 / 10.42 ms and 26.68.**

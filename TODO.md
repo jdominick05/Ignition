@@ -6,6 +6,22 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
 
 ## Completed
 
+- [x] Checkout-only owned prefix binding through a separate experimental
+  assistant and explicit terminal-chat switch. Full NPU input verification is
+  retained; cancellation during a bound dispatch and same-worker recovery are
+  checked. See [contract and limits](docs/HYBRID-ASSISTANT.md).
+
+- [x] Experimental opt-in bounded GPU activity helper: repeated requests,
+  joining before target verification, cancellation during confirmed activity,
+  recovery in one worker and native
+  tools checked. See [contract and limits](docs/HYBRID-ASSISTANT.md). Energy,
+  general acceleration and unattended 24/7 qualification remain open.
+
+- [x] Checkout-only experimental bounded workspace agent: native Gemma tools,
+  file reads/listings and arithmetic, with admission retry and cancellation.
+  See [scope and limits](docs/WORKSPACE-AGENT.md). Broad agent accuracy, net
+  acceleration and unattended operation remain open.
+
 - [x] **Native NPU path** (`ee66fbd`): `YOLOPipeline` serves an `.ignite` container through ignite-xdna's
   `YoloPipeline` on NPU Device 0, with boxes from the NPU's detect heads and no ONNX Runtime `run()` calls.
 - [x] **Camera and shutdown** (`ee66fbd`): timed opens across DirectShow, Media Foundation and OpenCV's default
