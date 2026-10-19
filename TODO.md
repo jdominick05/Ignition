@@ -97,7 +97,14 @@ Ignition does not track benchmark logs (`results/` is gitignored). How the pipel
   3.12 environment with AMD Quark 0.11.2, Ultralytics 8.4.153 and the Hugging Face CLI. Typed into one PowerShell
   window on a scratch install, the README's commands downloaded YOLOv8n from Hugging Face, exported and cut it,
   calibrated it on coco128 (304 s, 13.5 GB of temporary disk), compiled it in 13.0 s and ran `bus.jpg` at 7.730 ms
-  mean glass-to-glass; the container matched its model on 66/66 layers.
+  mean glass-to-glass; the container matched its model on 66/66 layers. Re-run on 2026-10-19 (Desktop 2) after the
+  walkthrough moved onto ignite-xdna's yolov8n recipe quickstart: a fresh `install.ps1 -InstallRoot` scratch install
+  (ignition-ai 0.3.4, ignite-xdna 0.3.2 from GitHub `main`), then steps 2-4 verbatim in Windows PowerShell 5.1. The
+  v8.3.0 weights matched the recipe's pinned sha256 (`f59b3d83...`); export 2.5 s, cut 0.4 s, coco128 calibration
+  316.5 s (temporary disk not measured), compile 14.7 s, and `--source examples\assets\bus.jpg --headless --frames
+  100` in place of the webcam window: 7.181 ms mean, 5 detections, boxes from the NPU heads on 100/100 frames, the
+  NPU idle before and after. Started from inside PowerShell 7, Windows PowerShell 5.1 fails at `Set-ExecutionPolicy`
+  (it inherits PowerShell 7's module path); a fresh window does not. Not run: PowerShell 7.
 - [x] **Badges against AMD's stack** (recorded in the commit that adds this entry): every number badge compares
   Ignition with AMD's stack and reads `docs/PERFORMANCE.md`, including the models Ignition loses, which mark where it
   needs work. In one sitting AMD's stack took 16.954 and 16.958 ms on YOLOv8s against Ignition's 17.240 and 17.265 ms,
