@@ -26,13 +26,13 @@ end than on AMD's own runtime, and more accurately, from a fraction of the insta
 Ignition compiles a model into an `.ignite` container that runs on the NPU of a Windows 11 PC with an AMD Phoenix
 processor.
 
-| Model | Task | On the NPU |
+| Model | On the NPU | Against AMD's stack |
 |---|---|---|
-| YOLOv8n, YOLOv8s | Detection | Every layer |
-| YOLOv8n-pose | Pose | Every layer |
-| YOLO11n | Detection | All but one attention block |
-| YOLO26n | Detection | All but two attention blocks |
-| SESR M7 | 2x super-resolution | Every layer |
+| YOLOv8n, YOLOv8n-pose | Every layer | Faster |
+| YOLO11n, YOLO26n | All but their attention blocks | Faster |
+| YOLOv8s | Every layer | Faster, until AMD's compiler is tuned |
+| YOLOv8m, l, x | Every layer | Slower |
+| SESR M7 super-resolution | Every layer | Slower |
 
 ## 1. Install
 
@@ -50,8 +50,7 @@ It sets up everything under `%LOCALAPPDATA%\Ignition`. To also install AMD's NPU
 
 ## 2. Get a model
 
-Download YOLOv8n, export it and cut off the decode head, which runs on the CPU. Containers expect the 80 COCO
-classes, so use the published weights:
+Download YOLOv8n's published COCO weights, export them and cut off the decode head, which runs on the CPU:
 
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process -Force; . "$env:LOCALAPPDATA\Ignition\ignition-models.ps1"
