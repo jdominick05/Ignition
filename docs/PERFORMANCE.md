@@ -20,9 +20,52 @@ The separate opt-in `PrefixBoundAssistant` reduces repeated host prefix packing
 in bounded diagnostics. Its evidence remains in the parent study; these
 observations do not qualify net acceleration, energy or unattended operation.
 
+## The release sitting against AMD's stack (2026-10-19)
+
+Every model Ignition runs, against AMD's Ryzen AI Software 1.7.1, in one pre-registered sitting on Desktop 2 (Ryzen 7
+8700G). Containers were built by their ignite-xdna recipes (compiler `v0.1.0-phoenix-npu-717-gb58994f71373`) and each
+matched its reference on every layer on the NPU first; each was compiled from the same quantized ONNX file AMD's stack
+ran. `live_ignition.py` (Ignition `c16abb2`) in the default power mode against ignite-xdna's AMD tools, 50 warm-up and
+500 timed frames of `bus.jpg` per run, two interleaved rounds (the second reversed), the NPU idle before every run,
+AMD's caches compiled fresh first. AMD "tuned" is its compiler with `enable_cost_model_tiling`, run on YOLOv8n and
+YOLOv8s. A side is faster only if its mean is lower in both rounds.
+
+Glass to glass, mean ms, rounds 1 / 2:
+
+| Model | Ignition | AMD's stack | AMD, tuned | Faster |
+|---|---|---|---|---|
+| YOLOv8n | **7.16 / 7.15 ms** | 10.83 / 10.84 ms | 10.17 / 10.26 ms | Ignition |
+| YOLOv8s | 15.77 / 15.77 ms | 17.22 / 17.25 ms | **14.60 / 14.66 ms** | Ignition against the default; **AMD tuned** |
+| YOLOv8n-pose | **7.50 / 7.50 ms** | at least 9.18 / 9.15 ms | — | Ignition |
+| YOLO11n | **9.85 / 9.88 ms** | 36.98 / 36.22 ms | — | Ignition, 3.7x |
+| YOLO26n | **10.83 / 10.77 ms** | 37.19 / 37.18 ms | — | Ignition, 3.4x |
+| SESR M7 | 4.46 / 4.54 ms | **3.97 / 4.26 ms** | — | **AMD** |
+| YOLOv8m | 39.18 / 39.23 ms | **31.95 / 31.95 ms** | — | **AMD**, 1.23x |
+| YOLOv8l | 69.96 / 69.97 ms | **51.47 / 51.47 ms** | — | **AMD**, 1.36x |
+| YOLOv8x | 112.90 / 113.00 ms | **78.93 / 79.00 ms** | — | **AMD**, 1.43x |
+
+- **Where AMD is ahead, its NPU stage is shorter.** On SESR M7, YOLOv8m, l and x, and tuned YOLOv8s, AMD's
+  `session.run` alone is shorter than Ignition's NPU dispatch, and the gap grows with model size. Ignition's lead on the
+  small models includes its native image preparation and box decoding (about 0.45 ms against 4 ms of the numpy code
+  AMD's column uses), so hand-written native code on AMD's side would narrow it.
+- **YOLOv8m, l and x run as single containers now**, every layer on the NPU with layer overlap. That made them faster
+  than the split containers below (43.60, 78.22, 125.50 ms on 2026-09-20, a different sitting), not faster than AMD.
+- **AMD's pose tool prints no frame mean**, only `session.run` (9.18 / 9.15 ms) and its preparation (3.15 / 3.18 ms).
+  Ignition's whole frame is shorter than AMD's network alone, so the pose row compares against that lower bound.
+- **Detections on `bus.jpg` differ** on YOLO11n (Ignition 5, AMD 7), YOLO26n (5, 6), YOLOv8m, l, x (5; 6, 6, 8) and
+  pose (4 people, 3). The cause is not separated; it is not an accuracy result. Accuracy was not re-measured: the
+  containers are exact against their references, so each section's COCO figures stand.
+- **A disturbed first pass was re-run.** Edits and checks ran on the host during some timed runs of YOLOv8n, YOLOv8s,
+  SESR M7 and YOLO11n; those four were re-run in full with nothing else on the host, and their rows are the re-run's.
+  The first pass agreed on every verdict.
+
+Record: ignite-xdna `55abf961`, [its BENCHMARKS section](https://github.com/jdominick05/ignite-xdna/blob/main/docs/BENCHMARKS.md#the-release-re-sit-against-amds-stack-ignition-faster-on-yolov8n-pose-yolo11n-and-yolo26n-amd-faster-on-sesr-m7-yolov8m-l-and-x-and-on-yolov8s-once-tuned-2026-10-19-desktop-2) and [the logs and pre-registration](https://github.com/jdominick05/ignite-xdna/blob/main/results/aie/release_resit_20261019/notes_release_resit.md).
+
 ## Ignition vs AMD's Ryzen AI stack
 
-**Against AMD's stack: 8.50 / 8.53 ms and 34.12 mAP@50-95, against 10.66 / 10.42 ms and 26.68.**
+**Against AMD's stack: 7.16 / 7.15 ms and 34.12 mAP@50-95, against 10.83 / 10.84 ms and 26.68.**
+
+Latency from [the 2026-10-19 sitting](#the-release-sitting-against-amds-stack-2026-10-19); accuracy from the evaluation below, on the same quantized model. The table that follows is an earlier sitting's, kept for its stage split.
 
 The same model (`yolov8n_cut_xint8.onnx`, AMD Quark XINT8) ran on the same image (`examples/assets/bus.jpg`) on a Ryzen 7 8700G. Ignition ran it as the container the README builds, compiled with `--silu-sigmoid`. Each run had 50 warm-up and 500 timed frames. Runs alternated AMD's stack, Ignition in its default `balanced` power mode, Ignition with `--power-mode performance` and a control container compiled without `--silu-sigmoid`, twice, with the NPU checked idle before each group, and both runs are shown in every cell. Both containers first matched their reference on every layer (66/66). Measured on 2026-09-17 (UTC) with ignite-xdna at `1879614`, released as 0.3.1, and Ignition at `e27ef79`; the record is ignite-xdna's `results/aie/release_033/latency_release033_phoenix_20260917T1538Z.log`.
 
@@ -94,7 +137,7 @@ Measured on 2026-09-14 through `live_ignition.py` with ignite-xdna `68c2fea` and
 
 ## YOLOv8s and SESR M7 against AMD's stack
 
-**YOLOv8s carries no badge, by the one-golden-model-per-family rule: YOLOv8n is the badge for the YOLOv8 detect family.** That is a presentation rule, not a quiet edit - **AMD's stack is faster on YOLOv8s** and the numbers below say so, as does SESR M7's badge, which stays orange because AMD is faster there too.
+**YOLOv8s carries no badge, by the one-golden-model-per-family rule: YOLOv8n is the badge for the YOLOv8 detect family.** That is a presentation rule, not a quiet edit - **AMD's stack is faster on YOLOv8s** once its compiler is tuned, and the numbers say so: in [the 2026-10-19 sitting](#the-release-sitting-against-amds-stack-2026-10-19) Ignition's 15.77 ms beat AMD's default (17.22 / 17.25 ms) but not its tuned build (14.60 / 14.66 ms). SESR M7's badge stays orange because AMD is faster there too. The tables below are the 2026-09-17 and 2026-09-20 sittings'.
 
 Measured on 2026-09-17 (UTC) for SESR M7 and the monolithic baselines, and extended on 2026-09-20 (UTC) with decoupled weights and per-segment dispatch costs on AMD Phoenix silicon (Desktop 2, Ryzen 7 8700G, XDNA1) with ignite-xdna and Ignition on `examples/assets/bus.jpg` with 50 warm-up and 500 timed frames per run. Every container first matched its reference on every layer (66/66 for YOLOv8s, 9/9 for SESR M7). AMD's runs used Ignition's own pre- and post-processing, and `xrt-smi` reported no hardware contexts before every group and at the end. The records are ignite-xdna's `results/aie/verify_yolov8s_split_silicon_phoenix_20260920.log`, `results/aie/split_container_sizing_phoenix_20260920.log`, and `results/aie/release_033/latency_release033_phoenix_20260917T1538Z.log`.
 
@@ -129,6 +172,8 @@ Measured on 2026-09-17 (UTC) for SESR M7 and the monolithic baselines, and exten
 - **Detections:** with `--silu-sigmoid` the YOLOv8s container finds the 5 objects AMD's stack finds; the control finds 6. Given the same input, each container matched its reference on every layer. Ignition's native letterbox rounds some input values one code differently from the numpy one, which moves borderline boxes.
 
 ## YOLOv8 family split containers against AMD's stack
+
+**Superseded for YOLOv8m, l and x by single containers** in [the 2026-10-19 sitting](#the-release-sitting-against-amds-stack-2026-10-19), which also ran AMD's stack beside them. This 2026-09-20 suite stays as the per-segment record.
 
 Measured on 2026-09-20 (UTC) on AMD Phoenix silicon (Desktop 2, Ryzen 7 8700G, XDNA1 NPU Device 0) with ignite-xdna and Ignition across all six YOLOv8 variants on `examples/assets/bus.jpg`. Process affinity was pinned to 8 physical CPU cores (`0x5555`, `OMP_NUM_THREADS=8`). Each model was compiled with zero CPU fallback partitions (100% NPU native) using multi-segment linked dispatch and decoupled stationary weights. `xrt-smi` confirmed no hardware contexts before and after the suite. The record is ignite-xdna's `results/aie/yolov8_split_suite_phoenix_20260920.log`.
 
@@ -176,7 +221,9 @@ Measured on 2026-09-17 (UTC) in one sitting on a Ryzen 7 8700G (Phoenix NPU Devi
 
 ## YOLO11n with its attention block
 
-**Against AMD's stack: 10.27 / 10.29 ms and 34.63 mAP@50-95, against 38.26 / 38.42 ms and 25.82.**
+**Against AMD's stack: 9.85 / 9.88 ms and 34.63 mAP@50-95, against 36.98 / 36.22 ms and 25.82.**
+
+Latency from [the 2026-10-19 sitting](#the-release-sitting-against-amds-stack-2026-10-19); accuracy from the evaluation below, on the same quantized model. The table that follows is an earlier sitting's, kept for its stage split.
 
 Measured on 2026-09-21 (UTC) in one sitting with Ignition in its default power mode, ignite-xdna at `d93c80e` and Ignition at `1b486c7`. The images were `examples/assets/bus.jpg`, with 50 warm-up and 500 timed frames per run. Runs alternated AMD's stack, a container with YOLO11n's whole C2PSA attention block on the CPU, one with only its attention core there, and that one again compiled with `--silu-sigmoid`. All three containers first matched their model on every layer (84/84, 91/91 and 91/91, the last against ignite-xdna's integer reference model of the sigmoid form), and `xrt-smi` reported no hardware contexts before every run and at the end. AMD's runs used ignite-xdna's `tools/amd_vitisai_yolo.py`, the Vitis AI loop of Ignition's `benchmarks/benchmark_yolo_vitisai.py` with Ignition's numpy letterbox and decode.
 
@@ -204,7 +251,9 @@ The earlier 2026-09-17 sitting of this section read 10.46 / 10.50 ms for the att
 
 ## YOLO26n with its DFL-free head
 
-**Against AMD's stack: 11.03 / 11.01 ms and 32.55 mAP@50-95, against 37.44 / 37.67 ms and 23.64.**
+**Against AMD's stack: 10.83 / 10.77 ms and 32.55 mAP@50-95, against 37.19 / 37.18 ms and 23.64.**
+
+Latency from [the 2026-10-19 sitting](#the-release-sitting-against-amds-stack-2026-10-19); accuracy from the evaluation below, on the same quantized model. The table that follows is an earlier sitting's, kept for its stage split.
 
 Measured on 2026-09-21 (UTC) in one sitting with Ignition in its default power mode, ignite-xdna at `c16daca` and Ignition at `c7efbb3`. The image was `examples/assets/bus.jpg`, with 50 warm-up and 500 timed frames per run. Runs alternated AMD's stack, the container compiled with `--silu-sigmoid`, and the same container without it. `xrt-smi` reported no hardware contexts before every run and at the end. AMD's arm ran ignite-xdna's `tools/amd_vitisai_yolo.py` with `--decoder npu.yolo26_decode:decode_heads`: YOLO26 dropped DFL, so its box head carries four channels rather than 4x16, and the YOLOv8-shaped decode would have placed every box wrongly without raising.
 
@@ -232,7 +281,9 @@ Measured on 2026-09-21 (UTC) in one sitting with Ignition in its default power m
 
 ## YOLOv8n-pose on the NPU
 
-**Against AMD's stack: 9.28 / 9.35 ms and 44.16 OKS mAP@50-95, against 12.07 / 11.97 ms and 32.64.**
+**Against AMD's stack: 7.50 / 7.50 ms and 44.16 OKS mAP@50-95, against at least 9.18 / 9.15 ms and 32.64.**
+
+Latency from [the 2026-10-19 sitting](#the-release-sitting-against-amds-stack-2026-10-19); accuracy from the evaluation below, on the same quantized model. The table that follows is an earlier sitting's, kept for its stage split. AMD's pose tool prints only its `session.run` time, so its figure here is a lower bound on its frame.
 
 Measured on 2026-09-17 (UTC) in one sitting with Ignition in its default power mode, ignite-xdna at `1879614` (released as 0.3.1) and Ignition at `e27ef79`, on ignite-xdna's `assets/bus.jpg` with 50 warm-up and 500 timed frames per run. The container was compiled with `--silu-sigmoid`, as the [usage notes](USAGE.md#5-run-other-models) build it, and a control compiled without it ran after Ignition in each group. Both matched their reference on every layer (75/75), and `xrt-smi` reported no hardware contexts before every group and at the end. ignite-xdna's `pipelines/yolov8n-pose/4_pose.py` timed AMD's stack and the container the same way, from the frame to the list of people, with its numpy letterbox for AMD's stack; runs 3 and 6 are Ignition's `live_ignition.py` on the same container. The record is ignite-xdna's `results/aie/release_033/latency_release033_phoenix_20260917T1538Z.log`.
 

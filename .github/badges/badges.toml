@@ -78,17 +78,17 @@ alt = "YOLOv8n-pose latency and COCO keypoint accuracy against AMD's stack, both
 label = "YOLOv8n-pose"
 file = "docs/PERFORMANCE.md"
 section = "YOLOv8n-pose on the NPU"
-search = '''## YOLOv8n-pose on the NPU(?s:.*?)\*\*Against AMD's stack: ([0-9.]+) / ([0-9.]+) ms and ([0-9.]+) (?:OKS )?mAP@50-95, against ([0-9.]+) / ([0-9.]+) ms and ([0-9.]+)\.\*\*'''
-replace = "$1 / $2 ms, $3 OKS mAP vs AMD $4 / $5 ms, $6 OKS mAP"
+search = '''## YOLOv8n-pose on the NPU(?s:.*?)\*\*Against AMD's stack: ([0-9.]+) / ([0-9.]+) ms and ([0-9.]+) (?:OKS )?mAP@50-95, against at least ([0-9.]+) / ([0-9.]+) ms and ([0-9.]+)\.\*\*'''
+replace = "$1 / $2 ms, $3 OKS mAP vs AMD >= $4 / $5 ms, $6 OKS mAP"
 color = "brightgreen"
 [[badge]]
 row = 2
 alt = "SESR M7 super-resolution latency per frame through Ignition and AMD's stack, both runs; AMD's stack is faster"
 label = "SESR M7 per frame"
 file = "docs/PERFORMANCE.md"
-section = "YOLOv8s and SESR M7 against AMD's stack"
-search = '\| 5 \| AMD[^|]*\| SESR M7 \| \**([0-9.]+) ms(?s:.*?)\| 6 \| Ignition[^|]*\| SESR M7 \| \**([0-9.]+) ms(?s:.*?)\| 7 \| AMD[^|]*\| SESR M7 \| \**([0-9.]+) ms(?s:.*?)\| 8 \| Ignition[^|]*\| SESR M7 \| \**([0-9.]+) ms'
-replace = "$2 / $4 ms vs AMD $1 / $3 ms"
+section = "The release sitting against AMD's stack (2026-10-19)"
+search = '\| SESR M7 \| ([0-9.]+) / ([0-9.]+) ms \| \*\*([0-9.]+) / ([0-9.]+) ms\*\* \|'
+replace = "$1 / $2 ms vs AMD $3 / $4 ms"
 color = "orange"
 [[badge]]
 row = 2
