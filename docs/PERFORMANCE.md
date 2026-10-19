@@ -25,7 +25,7 @@ observations do not qualify net acceleration, energy or unattended operation.
 Every model Ignition runs, against AMD's Ryzen AI Software 1.7.1, in one pre-registered sitting on Desktop 2 (Ryzen 7
 8700G). Containers were built by their ignite-xdna recipes (compiler `v0.1.0-phoenix-npu-717-gb58994f71373`) and each
 matched its reference on every layer on the NPU first; each was compiled from the same quantized ONNX file AMD's stack
-ran. `live_ignition.py` (Ignition `c16abb2`) in the default power mode against ignite-xdna's AMD tools, 50 warm-up and
+ran. `live_ignition.py` (Ignition `85d35d9`; the sitting's logs name it `c16abb2`, its unpublished first form with the same tree) in the default power mode against ignite-xdna's AMD tools, 50 warm-up and
 500 timed frames of `bus.jpg` per run, two interleaved rounds (the second reversed), the NPU idle before every run,
 AMD's caches compiled fresh first. AMD "tuned" is its compiler with `enable_cost_model_tiling`, run on YOLOv8n and
 YOLOv8s. A side is faster only if its mean is lower in both rounds.
